@@ -1,0 +1,22 @@
+# Web framework and ASGI server
+fastapi
+uvicorn[standard]
+# Database (async MongoDB)
+motor
+# Data validation and configuration
+pydantic
+pydantic-settings
+python-dotenv
+# Authentication and security
+bcrypt
+python-jose[cryptography]
+# LLM and AI/ML
+openai
+# Vector store and numerical computation
+faiss-cpu
+numpy
+# Document processing
+pymupdf
+python-docx
+# File upload handling
+python-multipart

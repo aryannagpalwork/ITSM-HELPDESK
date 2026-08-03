@@ -1,0 +1,135 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,100..900;1,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* ─────────────────────────────────────────────────────────────
+ * DESIGN TOKENS
+ *
+ * The full per-theme palettes live in ONE place: src/shared/ThemeContext.tsx
+ * (the THEMES config). Those blocks are generated and injected into a
+ * <style id="theme-tokens"> element before first paint. The theme is
+ * selected via [data-theme="<id>"] on <html>.
+ *
+ * The :root block below is only a minimal bootstrap fallback so the very
+ * first paint has a background/text color even if the injected style has
+ * not yet been evaluated. It intentionally mirrors the default theme.
+ * ───────────────────────────────────────────────────────────── */
+
+:root {
+  --app-bg:         #09090b;
+  --surface-bg:     #0a0a0a;
+  --card-bg:        rgba(24, 24, 27, 0.40);
+  --card-bg-solid:  #18181b;
+  --sidebar-bg:     #09090b;
+  --navbar-bg:      #0a0a0a;
+  --border:         #27272a;
+  --border-strong:  #3f3f46;
+  --text-primary:   #fafafa;
+  --text-secondary: #a1a1aa;
+  --text-tertiary:  #71717a;
+  --accent-primary: #6366f1;
+  --accent-primary-bg: rgba(99, 102, 241, 0.10);
+  --accent-primary-contrast: #ffffff;
+  --accent-secondary: #8b5cf6;
+  --hover:          rgba(82, 82, 91, 0.25);
+  --input-bg:       rgba(24, 24, 27, 0.80);
+  --scroll-track:   transparent;
+  --scroll-thumb:   rgba(63, 63, 70, 0.40);
+  --scroll-thumb-hover: rgba(82, 82, 91, 0.60);
+  --scrollbar:      rgba(63, 63, 70, 0.40);
+}
+
+/* Apply tokens globally to layout */
+html, body, #root {
+  background-color: var(--app-bg);
+  color: var(--text-primary);
+}
+
+/* Smooth theme transition (150–250ms) on color-bearing properties.
+ * Elements that declare their own transition (e.g. Tailwind's transition-*)
+ * keep it thanks to higher specificity, so interactive animations are
+ * unaffected. */
+*,
+*::before,
+*::after {
+  transition:
+    background-color 200ms ease,
+    border-color 200ms ease,
+    color 200ms ease,
+    fill 200ms ease,
+    stroke 200ms ease;
+}
+
+/* Custom global glassmorphism styles (theme-aware) */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--scroll-track);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-thumb-hover);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar) var(--scroll-track);
+}
+
+/* Tailwind-friendly utility fallbacks — consume theme tokens */
+.bg-app { background-color: var(--app-bg); }
+.bg-surface { background-color: var(--surface-bg); }
+.bg-card { background-color: var(--card-bg); }
+.bg-card-solid { background-color: var(--card-bg-solid); }
+.bg-sidebar { background-color: var(--sidebar-bg); }
+.bg-navbar { background-color: var(--navbar-bg); }
+.bg-input { background-color: var(--input-bg); }
+.bg-hover { background-color: var(--hover); }
+.bg-accent { background-color: var(--accent-primary); }
+.bg-accent-soft { background-color: var(--accent-primary-bg); }
+.border-token { border-color: var(--border); }
+.border-token-strong { border-color: var(--border-strong); }
+.text-primary { color: var(--text-primary); }
+.text-secondary { color: var(--text-secondary); }
+.text-tertiary { color: var(--text-tertiary); }
+.text-accent { color: var(--accent-primary); }
+.text-accent-secondary { color: var(--accent-secondary); }
+
+/* Token-backed hover helpers (Tailwind hover: only works on generated
+ * utilities, so these are provided explicitly for migrated components) */
+.hover-elev:hover { background-color: var(--hover); }
+.hover-surface:hover { background-color: var(--sidebar-hover); }
+.hover-text:hover { color: var(--text-primary); }
+.hover-border:hover { border-color: var(--border-strong); }
+.accent-btn { background-color: var(--accent-primary); color: var(--accent-primary-contrast); }
+.accent-btn:hover { background-color: var(--accent-primary-hover); }
+
+/* Reusable form field — background/border/text/placeholder + accent focus.
+ * Removes the need to repeat input token classes across every form. */
+.input-token {
+  background-color: var(--input-bg);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+}
+.input-token:focus { border-color: var(--accent-primary); }
+.input-token::placeholder { color: var(--text-tertiary); }
+
+/* ─────────────────────────────────────────────────────────────
+ * READABILITY FLOOR
+ *
+ * Many dense labels use very small arbitrary font sizes (9–11px) that are
+ * hard to read. These unlayered rules override the equivalent Tailwind
+ * utilities (which live in a cascade layer) to guarantee a legible minimum
+ * of ~12–13px everywhere — one central change, no per-component edits. */
+.text-\[9px\]  { font-size: 11px; }
+.text-\[10px\] { font-size: 12px; }
+.text-\[11px\] { font-size: 13px; }

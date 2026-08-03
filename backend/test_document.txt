@@ -1,0 +1,1 @@
+﻿This is a test document. It has multiple sentences. We want to verify that the ingestion pipeline works correctly. Let's write some more content to ensure we get multiple chunks. The quick brown fox jumps over the lazy dog. This sentence is here to add more length. Let's keep going to reach the chunk size limit. Okay, that should be enough for testing!

@@ -1,0 +1,37 @@
+[
+  {
+    "id": "KB001",
+    "title": "Resetting Corporate Password via Okta",
+    "category": "Authentication",
+    "content": "To reset your corporate password, navigate to okta.company.com, click on 'Forgot Password', and enter your corporate email. You will receive a secure reset link. If your account is locked out after 5 unsuccessful attempts, wait 15 minutes for automatic unlock or contact IT support.",
+    "tags": ["password", "reset", "okta", "locked"]
+  },
+  {
+    "id": "KB002",
+    "title": "Connecting to Corporate GlobalProtect VPN",
+    "category": "Network",
+    "content": "To connect to the GlobalProtect VPN: 1. Launch GlobalProtect client on your laptop. 2. Enter portal address: vpn.company.com. 3. Authenticate using your Okta credentials and complete MFA. 4. If connection fails, restart the Palo Alto GlobalProtect service or flush your local DNS.",
+    "tags": ["vpn", "network", "remote", "globalprotect"]
+  },
+  {
+    "id": "KB003",
+    "title": "Corporate Wi-Fi Setup for macOS and Windows",
+    "category": "Network",
+    "content": "Select the secure SSID 'Company-Secure'. Authenticate using your LDAP identity (Okta login without the @company.com suffix) and password. Accept the security certificate if prompted. For guest access, use SSID 'Company-Guest' and obtain the weekly passcode from the digital signage in the reception lobby.",
+    "tags": ["wifi", "network", "internet", "guest"]
+  },
+  {
+    "id": "KB004",
+    "title": "Ordering Hardware and Peripherals",
+    "category": "Procurement",
+    "content": "All hardware requests must go through the IT Procurement portal. Standard equipment includes Macbook Pro 16\", ThinkPad T14, 27\" Dell Monitors, and Logitech MX Keys/Master combos. Orders require Department Head approval and take 3-5 business days to fulfill.",
+    "tags": ["hardware", "laptop", "monitor", "procurement"]
+  },
+  {
+    "id": "KB005",
+    "title": "Setting Up Corporate Email on Mobile Devices",
+    "category": "Software",
+    "content": "To access Outlook on mobile: 1. Download the Microsoft Outlook app from App Store or Play Store. 2. Enter corporate email. 3. System will redirect to Okta login. 4. Complete MFA. 5. Enroll in Mobile Device Management (MDM) via Microsoft Intune for security compliance.",
+    "tags": ["email", "outlook", "mobile", "intune", "mdm"]
+  }
+]

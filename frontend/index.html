@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Enterprise ITSM Helpdesk Copilot</title>
+    <script>
+      // Set the persisted theme before first paint to avoid any flash.
+      (function () {
+        try {
+          var t = localStorage.getItem('itsm:theme');
+          if (t) document.documentElement.setAttribute('data-theme', t);
+        } catch (e) { /* ignore */ }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

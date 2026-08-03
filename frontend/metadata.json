@@ -1,0 +1,8 @@
+{
+  "name": "Remix: ITSM Helpdesk Copilot",
+  "description": "An Enterprise ITSM Helpdesk Copilot with AI Chat, Ticket System, and Knowledge Base retrieval using RAG.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
