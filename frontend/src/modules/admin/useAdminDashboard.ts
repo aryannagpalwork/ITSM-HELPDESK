@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '../../shared/AppContext';
-import { getAdminTicketTimeline, getAdminAICopilotTimeline } from '../../shared/api';
+import { getAdminTicketTimeline, getAdminAICopilotTimeline, getAgentsAvailability } from '../../shared/api';
 import {
+  AgentAvailability,
   Ticket,
   TimelineRange,
   TicketLifecycleTimeline,
@@ -110,15 +111,9 @@ export function useAdminDashboard(enabled: boolean) {
 
   const [ticketTimeline, setTicketTimeline] = useState<TicketLifecycleTimeline | null>(null);
   const [aiTimeline, setAiTimeline] = useState<AICopilotTimeline | null>(null);
+  const [agentsAvailability, setAgentsAvailability] = useState<AgentAvailability[]>([]);
   const [timelinesLoading, setTimelinesLoading] = useState(false);
   const [timelinesError, setTimelinesError] = useState<string | null>(null);
-
-  // Refresh organization KPIs when ticket data changes so the FCR and CSAT
-  // cards reflect updates immediately instead of waiting for polling.
-  const ticketRefreshKey = useMemo(
-    () => tickets.map(ticket => `${ticket.id}:${ticket.status}:${ticket.updatedAt}`).join('|'),
-    [tickets],
-  );
 
   const fetchTimelines = useCallback(async (r: TimelineRange) => {
     try {
@@ -139,6 +134,16 @@ export function useAdminDashboard(enabled: boolean) {
     }
   }, []);
 
+  const fetchAvailability = useCallback(async () => {
+    try {
+      const availability = await getAgentsAvailability();
+      setAgentsAvailability(availability);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Unable to load agents availability';
+      console.warn(msg, error);
+    }
+  }, []);
+
   // Fetch timelines on mount and whenever the range changes.
   useEffect(() => {
     if (enabled) {
@@ -146,18 +151,25 @@ export function useAdminDashboard(enabled: boolean) {
     }
   }, [enabled, range, fetchTimelines]);
 
-  // Load KPIs on mount and whenever the local ticket snapshot changes.
+  useEffect(() => {
+    if (enabled) {
+      fetchAvailability();
+    }
+  }, [enabled, fetchAvailability]);
+
+  // Load KPIs on mount when enabled.
   useEffect(() => {
     if (enabled) {
       loadAdminKPIs();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, ticketRefreshKey]);
+  }, [enabled]);
 
   const refreshAll = useCallback(() => {
     loadAdminKPIs();
     fetchTimelines(range);
-  }, [loadAdminKPIs, fetchTimelines, range]);
+    fetchAvailability();
+  }, [loadAdminKPIs, fetchTimelines, fetchAvailability, range]);
 
   // Keep a stable reference to the latest refresh logic so the polling
   // interval is created once and always sees the current range.
@@ -166,8 +178,9 @@ export function useAdminDashboard(enabled: boolean) {
     savedRefresh.current = () => {
       loadAdminKPIs();
       fetchTimelines(range);
+      fetchAvailability();
     };
-  }, [loadAdminKPIs, fetchTimelines, range]);
+  }, [loadAdminKPIs, fetchTimelines, fetchAvailability, range]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -257,6 +270,11 @@ export function useAdminDashboard(enabled: boolean) {
       }));
   }, [tickets]);
 
+  const agentsOnLeaveToday = useMemo(
+    () => agentsAvailability.filter(agent => agent.onLeaveToday).length,
+    [agentsAvailability],
+  );
+
   return {
     range,
     setRange,
@@ -273,6 +291,8 @@ export function useAdminDashboard(enabled: boolean) {
     filteredTicketCount: filteredTickets.length,
     incidentQueue,
     recentActivity,
+    agentsAvailability,
+    agentsOnLeaveToday,
     adminKPIs,
     kpisLoading,
     kpisError,

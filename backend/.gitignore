@@ -1,3 +1,26 @@
 .env
 .env.*
 !.env.example
+
+# Virtual environment
+.venv/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# pytest cache
+.pytest_cache/
+
+# mypy
+.mypy_cache/
+
+# VSCode settings
+.vscode/
+
+# Logs
+*.log
+
+# Uploaded files (runtime)
+uploads/

@@ -23,11 +23,18 @@ class Settings(BaseModel):
     jwt_algorithm: str = Field(default="HS256")
     access_token_expire_minutes: int = Field(default=30)
     refresh_token_expire_days: int = Field(default=7)
+    gemini_api_key: str = Field(default="")
+    gemini_model: str = Field(default="gemini-2.5-flash")
     openai_api_key: str = Field(default="")
-    llm_provider: str = Field(default="openai")
-    chat_model: str = Field(default="gpt-5.5")
-    embedding_provider: str = Field(default="openai")
-    embedding_model: str = Field(default="text-embedding-3-small")
+    llm_provider: str = Field(default="gemini")
+    chat_model: str = Field(default="gemini-2.5-flash")
+    embedding_provider: str = Field(default="gemini")
+    embedding_model: str = Field(default="text-embedding-004")
+    email_provider: str = Field(default="graph")
+    graph_tenant_id: str = Field(default="")
+    graph_client_id: str = Field(default="")
+    graph_client_secret: str = Field(default="")
+    graph_mailbox: str = Field(default="")
 
 
 def _get_bool(name: str, default: bool) -> bool:
@@ -60,9 +67,16 @@ def get_settings() -> Settings:
         jwt_algorithm=os.getenv("JWT_ALGORITHM", "HS256"),
         access_token_expire_minutes=int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 30)),
         refresh_token_expire_days=int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 7)),
+        gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
+        gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
         openai_api_key=os.getenv("OPENAI_API_KEY", ""),
-        llm_provider="openai",
-        chat_model=os.getenv("OPENAI_CHAT_MODEL", "gpt-5.5"),
-        embedding_provider=os.getenv("EMBEDDING_PROVIDER", "openai"),
-        embedding_model=os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
+        llm_provider=os.getenv("LLM_PROVIDER", "gemini"),
+        chat_model=os.getenv("CHAT_MODEL", "gemini-2.5-flash"),
+        embedding_provider=os.getenv("EMBEDDING_PROVIDER", "gemini"),
+        embedding_model=os.getenv("EMBEDDING_MODEL", "text-embedding-004"),
+        email_provider=os.getenv("EMAIL_PROVIDER", "graph"),
+        graph_tenant_id=os.getenv("GRAPH_TENANT_ID", ""),
+        graph_client_id=os.getenv("GRAPH_CLIENT_ID", ""),
+        graph_client_secret=os.getenv("GRAPH_CLIENT_SECRET", ""),
+        graph_mailbox=os.getenv("GRAPH_MAILBOX", ""),
     )

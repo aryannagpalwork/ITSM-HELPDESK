@@ -12,6 +12,7 @@ bcrypt
 python-jose[cryptography]
 # LLM and AI/ML
 openai
+google-generativeai
 # Vector store and numerical computation
 faiss-cpu
 numpy
@@ -20,3 +21,5 @@ pymupdf
 python-docx
 # File upload handling
 python-multipart
+msal
+httpx

@@ -173,9 +173,10 @@ async def list_tickets_endpoint(
 ) -> TicketListResponse:
     """List tickets with pagination, filtering, search, and sorting.
     
-    For agents, this endpoint always returns only tickets assigned to the
-    authenticated agent. The assignment parameter remains accepted for
-    backward compatibility.
+    For agents, the `assignment` parameter controls the smart ticket view:
+    - "assigned": only tickets assigned to the agent
+    - "unassigned": only unassigned tickets matching the agent's specialization
+    - omit: all tickets the agent can work on (assigned + matching unassigned)
     """
     return await list_tickets(
         db,
@@ -198,7 +199,7 @@ async def list_tickets_endpoint(
 @router.get("/agents", status_code=status.HTTP_200_OK)
 async def list_agents(
     db: DatabaseSession,
-    current_user: dict = Depends(require_roles(["Agent", "Administrator"])),
+    current_user: dict = Depends(require_roles(["Administrator"])),
 ) -> list[dict]:
     """List all active agents with their specialization and current workload."""
     import logging
@@ -222,7 +223,6 @@ async def list_agents(
             "assigned_to": agent["_id"],
             "status": {"$in": ["Open", "In Progress"]}
         })
-        availability = agent.get("availability", "Available")
         result.append({
             "id": agent["_id"],
             "name": agent.get("full_name", ""),
@@ -231,8 +231,7 @@ async def list_agents(
             "specialization": agent.get("specialization"),
             "status": agent.get("status", "ACTIVE"),
             "activeTicketCount": open_tickets,
-            "availability": availability,
-            "available": availability == "Available" and open_tickets < agent.get("max_capacity", 10),
+            "available": open_tickets < 10,  # Simple heuristic: < 10 open tickets = available
         })
     
     logger.debug(f"[list_agents] Returning {len(result)} agent(s): {result}")

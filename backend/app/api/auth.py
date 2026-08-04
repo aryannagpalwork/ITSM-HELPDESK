@@ -9,6 +9,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.api.deps import DatabaseSession
 from app.auth.security import create_token, decode_token, verify_password, hash_password
 from app.auth.dependencies import require_roles
+from app.auth.dependencies import get_current_user
 from app.config.settings import get_settings
 from app.schemas.auth import (
     ForgotPasswordRequest,
@@ -23,7 +24,10 @@ from app.schemas.auth import (
 )
 from app.schemas.user import UserStatus
 from app.auth.dependencies import FRONTEND_TO_INTERNAL
+from app.services.email_service import PasswordResetEmailService
 from app.services.password_reset import PasswordResetService
+from app.auth.security import verify_password, hash_password
+from app.schemas.auth import ChangePasswordRequest
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -228,14 +232,27 @@ async def forgot_password(
 
     if raw_token:
         logger.info("Password reset token generated for email: %s", payload.email)
+        email_service = PasswordResetEmailService()
+        reset_link = f"http://localhost:3000/#/reset-password?token={raw_token}&email={payload.email.strip().lower()}"
+        email_service.send_password_reset_email(
+            recipient_email=payload.email.strip().lower(),
+            recipient_name=payload.email.strip().lower(),
+            reset_link=reset_link,
+        )
     else:
         logger.info(
             "Password reset requested for non-existent email: %s", payload.email
         )
 
+    reset_link = None
+    settings = get_settings()
+    if raw_token and settings.email_provider.lower() != "graph":
+        reset_link = f"http://localhost:3000/#/reset-password?token={raw_token}&email={payload.email.strip().lower()}"
+
     return ForgotPasswordResponse(
         detail=detail,
         reset_token=raw_token,
+        reset_link=reset_link,
     )
 
 
@@ -298,3 +315,34 @@ async def reset_password(
     return ResetPasswordResponse(
         detail="Password has been reset successfully. You can now log in with your new password."
     )
+
+
+@router.post("/change-password", response_model=ResetPasswordResponse)
+async def change_password(
+    payload: ChangePasswordRequest,
+    db: DatabaseSession,
+    current_user: dict = Depends(get_current_user),
+) -> ResetPasswordResponse:
+    """Change the authenticated user's password.
+
+    Expects current_password and new_password (with confirmation).
+    """
+    # Validate new password
+    if payload.new_password != payload.confirm_password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New passwords do not match.")
+    if len(payload.new_password) < 8:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password must be at least 8 characters long.")
+
+    # Load user from DB to check current password
+    user = await db.users.find_one({"_id": current_user["id"], "deleted": {"$ne": True}})
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+
+    if not verify_password(payload.current_password, user["hashed_password"]):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect.")
+
+    new_hashed = hash_password(payload.new_password)
+    now = datetime.utcnow()
+    await db.users.update_one({"_id": user["_id"]}, {"$set": {"hashed_password": new_hashed, "updated_at": now}})
+
+    return ResetPasswordResponse(detail="Password changed successfully.")

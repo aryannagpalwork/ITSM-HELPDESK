@@ -72,6 +72,7 @@ export const AdminDashboard: React.FC = () => {
     filteredTicketCount,
     incidentQueue,
     recentActivity,
+    agentsOnLeaveToday,
     adminKPIs,
     kpisLoading,
     kpisError,
@@ -100,11 +101,9 @@ export const AdminDashboard: React.FC = () => {
   }
 
   // Derived merged values (prefer backend adminKPIs where available).
-  const validKpiValue = (value: number | undefined) =>
-    typeof value === 'number' && Number.isFinite(value) ? value : null;
-  const orgMTTR = validKpiValue(adminKPIs?.orgMttrHours);
-  const orgFCR = validKpiValue(adminKPIs?.orgFcrRate);
-  const orgCSAT = validKpiValue(adminKPIs?.orgCsatScore);
+  const orgMTTR = adminKPIs?.orgMttrHours ?? null;
+  const orgFCR = adminKPIs?.orgFcrRate ?? null;
+  const orgCSAT = adminKPIs?.orgCsatScore ?? null;
   const richKpisAvailable = adminKPIs !== null && isAdmin;
   const kpiLoading = isAdmin && kpisLoading && !adminKPIs;
 
@@ -161,7 +160,7 @@ export const AdminDashboard: React.FC = () => {
             <span>Unable to refresh live org metrics — showing available data. {kpisError}</span>
           </div>
         )}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
           <KpiCard
             label="Mean Time To Resolve"
             icon={<Timer className="w-3.5 h-3.5 text-sky-400" />}
@@ -176,7 +175,7 @@ export const AdminDashboard: React.FC = () => {
           <KpiCard
             label="First Contact Resolution"
             icon={<Target className="w-3.5 h-3.5 text-green-400" />}
-            value={orgFCR !== null ? `${orgFCR}%` : '--'}
+            value={orgFCR !== null ? `${orgFCR}%` : '—'}
             valueClass="text-green-400"
             sublabel={richKpisAvailable ? 'Resolved on first contact' : 'Pending data'}
             loading={kpiLoading}
@@ -187,13 +186,23 @@ export const AdminDashboard: React.FC = () => {
           <KpiCard
             label="User Satisfaction (CSAT)"
             icon={<Smile className="w-3.5 h-3.5 text-emerald-400" />}
-            value={orgCSAT !== null ? `${orgCSAT}%` : '--'}
+            value={orgCSAT !== null ? `${orgCSAT}%` : '—'}
             valueClass="text-emerald-400"
             sublabel={richKpisAvailable ? 'Derived satisfaction index' : 'Pending data'}
             loading={kpiLoading}
             isActive={filterActive('User Satisfaction (CSAT)')}
             onClick={() => onFilter({ label: 'User Satisfaction (CSAT)', status: 'resolved' })}
             onOpen={() => goToTickets('?status=resolved')}
+          />
+          <KpiCard
+            label="Agents On Leave Today"
+            icon={<AlertCircle className="w-3.5 h-3.5 text-amber-400" />}
+            value={agentsOnLeaveToday}
+            valueClass="text-amber-400"
+            sublabel="Approved leave requests active today"
+            onClick={() => navigate('/admin/leaves?view=current')}
+            onOpen={() => navigate('/admin/leaves?view=current')}
+            openLabel="Open currently on leave view"
           />
         </div>
       </div>

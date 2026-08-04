@@ -1,24 +1,26 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useApp } from '../../shared/AppContext';
+import { ThemeSelector } from '../../shared/ThemeSelector';
 import { 
   LayoutDashboard, 
   MessageSquareCode, 
   TicketCheck, 
   BookOpen, 
-  ShieldAlert, 
+  CalendarDays,
   Settings as SettingsIcon, 
   LogOut, 
   Sparkles,
   ChevronRight,
   UserPlus,
-  UserCog
+  KeyRound
 } from 'lucide-react';
 
 export const AdminSidebar: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { currentUser, logout } = useApp();
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
 
   const handleNavigation = (path: string) => {
     navigate(path);
@@ -47,19 +49,14 @@ export const AdminSidebar: React.FC = () => {
       icon: BookOpen,
     },
     { 
-      name: 'Admin Command', 
-      path: '/admin/dashboard', 
-      icon: ShieldAlert,
+      name: 'Leave Management',
+      path: '/admin/leaves',
+      icon: CalendarDays,
     },
     { 
       name: 'User Management', 
       path: '/admin/pending-users', 
       icon: UserPlus,
-    },
-    {
-      name: 'Agent Management',
-      path: '/admin/agents',
-      icon: UserCog,
     },
     { 
       name: 'Settings', 
@@ -121,7 +118,7 @@ export const AdminSidebar: React.FC = () => {
             
             return (
               <button
-                key={`${item.name}-${item.path}`}
+                key={item.path}
                 onClick={() => handleNavigation(item.path)}
                 className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all group"
                 style={{
@@ -177,65 +174,100 @@ export const AdminSidebar: React.FC = () => {
         className="p-4"
         style={{ borderTop: '1px solid var(--border)', backgroundColor: 'var(--sidebar-bg)' }}
       >
-        <div className="flex items-center justify-between mb-3 gap-2 p-1.5">
-          <div className="flex items-center space-x-3 min-w-0 flex-1">
-            <div className="relative shrink-0">
-              <div
-                className="w-9 h-9 rounded-xl flex items-center justify-center font-semibold text-sm"
-                style={{
-                  backgroundColor: 'var(--accent-primary-bg)',
-                  border: '1px solid var(--border-strong)',
-                  color: 'var(--accent-primary)',
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setProfileMenuOpen(prev => !prev)}
+            className="w-full flex items-center justify-between mb-3 gap-2 p-1.5 rounded-lg transition-colors"
+            style={{ backgroundColor: 'transparent' }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--sidebar-hover)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+            }}
+          >
+            <div className="flex items-center space-x-3 min-w-0 flex-1">
+              <div className="relative shrink-0">
+                <div
+                  className="w-9 h-9 rounded-xl flex items-center justify-center font-semibold text-sm"
+                  style={{
+                    backgroundColor: 'var(--accent-primary-bg)',
+                    border: '1px solid var(--border-strong)',
+                    color: 'var(--accent-primary)',
+                  }}
+                >
+                  {currentUser.name.split(' ').map(n => n[0]).join('')}
+                </div>
+                <div
+                  className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 rounded-full border-2 shadow-sm"
+                  style={{ borderColor: 'var(--sidebar-bg)' }}
+                />
+              </div>
+              <div className="min-w-0">
+                <h4
+                  className="text-xs font-semibold truncate"
+                  style={{ color: 'var(--text-primary)' }}
+                >
+                  {currentUser.name}
+                </h4>
+                <p
+                  className="text-[10px] truncate"
+                  style={{ color: 'var(--text-tertiary)' }}
+                >
+                  {currentUser.email}
+                </p>
+              </div>
+            </div>
+            <ThemeSelector compact />
+          </button>
+
+          {profileMenuOpen && (
+            <div className="absolute bottom-full left-0 right-0 mb-2 rounded-xl border overflow-hidden shadow-2xl"
+              style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--border)' }}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  setProfileMenuOpen(false);
+                  navigate('/change-password');
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-xs font-medium transition-colors"
+                style={{ color: 'var(--text-primary)' }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--sidebar-hover)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
                 }}
               >
-                {currentUser.name.split(' ').map(n => n[0]).join('')}
-              </div>
-              <div
-                className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 rounded-full border-2 shadow-sm"
-                style={{ borderColor: 'var(--sidebar-bg)' }}
-              />
-            </div>
-            <div className="min-w-0">
-              <h4
-                className="text-xs font-semibold truncate"
+                <KeyRound className="w-3.5 h-3.5" style={{ color: 'var(--accent-primary)' }} />
+                <span>Change password</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setProfileMenuOpen(false);
+                  logout();
+                  navigate('/');
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-xs font-medium transition-colors"
                 style={{ color: 'var(--text-primary)' }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--sidebar-hover)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }}
               >
-                {currentUser.name}
-              </h4>
-              <p
-                className="text-[10px] truncate"
-                style={{ color: 'var(--text-tertiary)' }}
-              >
-                {currentUser.email}
-              </p>
+                <LogOut className="w-3.5 h-3.5" style={{ color: 'var(--text-tertiary)' }} />
+                <span>Exit Workstation</span>
+              </button>
             </div>
-          </div>
+          )}
         </div>
-
-        <button
-          onClick={() => {
-            logout();
-            navigate('/');
-          }}
-          className="w-full flex items-center justify-center space-x-2 py-2 px-3 border rounded-lg text-xs font-medium transition-all cursor-pointer"
-          style={{
-            backgroundColor: 'var(--card-bg)',
-            borderColor: 'var(--border)',
-            color: 'var(--text-secondary)',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = 'var(--sidebar-hover)';
-            e.currentTarget.style.color = 'var(--text-primary)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = 'var(--card-bg)';
-            e.currentTarget.style.color = 'var(--text-secondary)';
-          }}
-        >
-          <LogOut className="w-3.5 h-3.5" />
-          <span>Exit Workstation</span>
-        </button>
       </div>
     </div>
   );
 };
+

@@ -38,6 +38,7 @@ class ForgotPasswordRequest(BaseModel):
 class ForgotPasswordResponse(BaseModel):
     detail: str
     reset_token: str | None = None
+    reset_link: str | None = None
 
 
 class ResetPasswordRequest(BaseModel):
@@ -48,3 +49,9 @@ class ResetPasswordRequest(BaseModel):
 
 class ResetPasswordResponse(BaseModel):
     detail: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+    confirm_password: str

@@ -55,10 +55,6 @@ export interface Ticket {
   // Joins (Optional)
   userName?: string;
   agentName?: string;
-  assignmentType?: string;
-  assignmentReason?: string;
-  matchedSpecialization?: string;
-  assignedAt?: string;
   departmentName?: string;
 }
 
@@ -274,4 +270,36 @@ export interface AdminKPIs {
   aiResolutionRate: number;
   aiQueries: number;
   aiCopilot: AICopilotAdminKPIs;
+}
+
+export type LeaveRequestStatus = 'pending' | 'approved' | 'rejected';
+
+export interface LeaveRequest {
+  id: string;
+  agentId: string;
+  agentName?: string;
+  startDate: string;
+  endDate: string;
+  reason: string;
+  status: LeaveRequestStatus;
+  requestedAt: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  rejectionReason?: string;
+}
+
+export interface AgentAvailability {
+  agentId: string;
+  name: string;
+  onLeaveToday: boolean;
+  openTicketCount: number;
+}
+
+export interface CurrentlyOnLeave {
+  agentId: string;
+  agentName: string;
+  startDate: string;
+  endDate: string;
+  openTicketCount: number;
+  status: 'on_leave';
 }

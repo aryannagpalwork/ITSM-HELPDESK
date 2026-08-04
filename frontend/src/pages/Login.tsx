@@ -113,6 +113,19 @@ export const Login: React.FC = () => {
             </div>
           </div>
 
+          <div className="flex items-center justify-end">
+            <button
+              type="button"
+              onClick={() => navigate('/forgot-password', { replace: true })}
+              className="text-xs font-medium transition-colors"
+              style={{ color: 'var(--accent-primary)' }}
+              onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.8'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
+            >
+              Forgot password?
+            </button>
+          </div>
+
           <button 
             type="submit"
             disabled={isLoading}
@@ -131,7 +144,7 @@ export const Login: React.FC = () => {
           <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
             Don't have an account?{' '}
             <button
-              onClick={() => navigate('/register')}
+              onClick={() => navigate('/register', { replace: true })}
               className="font-medium transition-colors"
               style={{ color: 'var(--accent-primary)' }}
               onMouseEnter={(e)=>{ e.currentTarget.style.opacity='0.8'; }}
