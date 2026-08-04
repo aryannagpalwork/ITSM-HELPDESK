@@ -21,6 +21,34 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000
 const ACCESS_TOKEN_KEY = 'it_copilot_access_token';
 const REFRESH_TOKEN_KEY = 'it_copilot_refresh_token';
 
+export interface AdminAgent {
+  id: string;
+  full_name: string;
+  email: string;
+  department?: string | null;
+  specialization?: string | string[] | null;
+  availability?: string | null;
+  max_capacity: number;
+  active_ticket_count: number;
+  total_assigned: number;
+  total_resolved: number;
+  last_assigned_at?: string | null;
+  status?: string | null;
+  is_active: boolean;
+}
+
+export interface AdminAgentTicket {
+  id: string;
+  ticket_number: string;
+  title: string;
+  category: string;
+  priority: string;
+  status: string;
+  employee_name?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 let isRefreshing = false;
 let failedQueue: Array<{ resolve: (value: any) => void; reject: (reason: any) => void }> = [];
 
@@ -833,11 +861,60 @@ export const assignTicket = async (id: string, assignedTo?: string, reason?: str
   return mapTicket((await response.json()) as BackendTicket);
 };
 
+// The backend uses the same assignment endpoint for first assignment and reassignment.
+export const reassignTicket = assignTicket;
+
 export const listAgents = async (): Promise<{ id: string; name: string; email: string; department?: string; specialization?: string; status: string; activeTicketCount: number; available: boolean }[]> => {
   const response = await apiFetch(`${API_BASE_URL}/tickets/agents`);
   if (!response.ok) {
     throw new Error(`Unable to fetch agents: ${response.status}`);
   }
+  return await response.json();
+};
+
+export const listAdminAgents = async (query: {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  department?: string;
+  specialization?: string;
+  availability?: string;
+} = {}): Promise<{ items: AdminAgent[]; total: number; page: number; page_size: number; pages: number }> => {
+  const params = new URLSearchParams();
+  if (query.page) params.set('page', String(query.page));
+  if (query.pageSize) params.set('page_size', String(query.pageSize));
+  if (query.search) params.set('search', query.search);
+  if (query.department) params.set('department', query.department);
+  if (query.specialization) params.set('specialization', query.specialization);
+  if (query.availability) params.set('availability', query.availability);
+
+  const response = await apiFetch(`${API_BASE_URL}/admin/agents?${params.toString()}`);
+  if (!response.ok) throw new Error(`Unable to fetch admin agents: ${response.status}`);
+  return await response.json();
+};
+
+export const getAdminAgent = async (agentId: string): Promise<AdminAgent> => {
+  const response = await apiFetch(`${API_BASE_URL}/admin/agents/${agentId}`);
+  if (!response.ok) throw new Error(`Unable to fetch admin agent: ${response.status}`);
+  return await response.json();
+};
+
+export const listAdminAgentTickets = async (agentId: string, query: {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+} = {}): Promise<{ items: AdminAgentTicket[]; total: number; page: number; page_size: number; pages: number; summary: Record<string, number> }> => {
+  const params = new URLSearchParams();
+  if (query.page) params.set('page', String(query.page));
+  if (query.pageSize) params.set('page_size', String(query.pageSize));
+  if (query.search) params.set('search', query.search);
+  if (query.sortBy) params.set('sort_by', query.sortBy);
+  if (query.sortOrder) params.set('sort_order', query.sortOrder);
+
+  const response = await apiFetch(`${API_BASE_URL}/admin/agents/${agentId}/tickets?${params.toString()}`);
+  if (!response.ok) throw new Error(`Unable to fetch agent tickets: ${response.status}`);
   return await response.json();
 };
 

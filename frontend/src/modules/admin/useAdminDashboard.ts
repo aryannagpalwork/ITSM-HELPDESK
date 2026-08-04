@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '../../shared/AppContext';
-import { getAdminTicketTimeline, getAdminAICopilotTimeline, getAgentsAvailability } from '../../shared/api';
-import { getAdminAnalytics } from '../../shared/api';
+import { getAgentsAvailability, getAdminAnalytics } from '../../shared/api';
 import {
   AgentAvailability,
   Ticket,
@@ -101,8 +100,6 @@ export function useAdminDashboard(enabled: boolean) {
   const [year, setYear] = useState(now.getFullYear());
   const [activeFilter, setActiveFilter] = useState<AdminCardFilter | null>(null);
 
-  const [ticketTimeline, setTicketTimeline] = useState<TicketLifecycleTimeline | null>(null);
-  const [aiTimeline, setAiTimeline] = useState<AICopilotTimeline | null>(null);
   const [agentsAvailability, setAgentsAvailability] = useState<AgentAvailability[]>([]);
   const [analytics, setAnalytics] = useState<AdminAnalytics | null>(null);
   const [timelinesLoading, setTimelinesLoading] = useState(false);
@@ -155,11 +152,9 @@ export function useAdminDashboard(enabled: boolean) {
 
   const refreshAll = useCallback(() => {
     loadAdminKPIs();
-    fetchTimelines(range);
     fetchAvailability();
-  }, [loadAdminKPIs, fetchTimelines, fetchAvailability, range]);
     fetchAnalytics(month, year);
-  }, [loadAdminKPIs, fetchAnalytics, month, year]);
+  }, [loadAdminKPIs, fetchAnalytics, fetchAvailability, month, year]);
 
   // Keep a stable reference to the latest refresh logic so the polling
   // interval is created once and always sees the current range.
@@ -167,12 +162,10 @@ export function useAdminDashboard(enabled: boolean) {
   useEffect(() => {
     savedRefresh.current = () => {
       loadAdminKPIs();
-      fetchTimelines(range);
       fetchAvailability();
       fetchAnalytics(month, year);
     };
-  }, [loadAdminKPIs, fetchTimelines, fetchAvailability, range]);
-  }, [loadAdminKPIs, fetchAnalytics, month, year]);
+  }, [loadAdminKPIs, fetchAnalytics, fetchAvailability, month, year]);
 
   useEffect(() => {
     if (!enabled) return;

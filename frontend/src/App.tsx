@@ -27,6 +27,7 @@ import { AgentDashboard } from './modules/agent/Dashboard';
 
 import { AdminLayout } from './modules/admin/Layout';
 import { AdminDashboard } from './modules/admin/Dashboard';
+import { AgentManagement } from './modules/admin/AgentManagement';
 import { AdminPendingUsers } from './modules/admin/PendingUsers';
 
 // Protected Route Component
@@ -169,13 +170,6 @@ export default function App() {
                 </AgentLayout>
               </RoleProtectedRoute>
             } />
-            <Route path="/agent/kb" element={
-              <RoleProtectedRoute allowedRoles={['Agent', 'Administrator']}>
-                <AgentLayout>
-                  <KnowledgeBase />
-                </AgentLayout>
-              </RoleProtectedRoute>
-            } />
             <Route path="/agent/leaves" element={
               <RoleProtectedRoute allowedRoles={['Agent']}>
                 <AgentLayout>
@@ -196,6 +190,13 @@ export default function App() {
               <RoleProtectedRoute allowedRoles={['Administrator']}>
                 <AdminLayout>
                   <AdminPendingUsers />
+                </AdminLayout>
+              </RoleProtectedRoute>
+            } />
+            <Route path="/admin/agents" element={
+              <RoleProtectedRoute allowedRoles={['Administrator']}>
+                <AdminLayout>
+                  <AgentManagement />
                 </AdminLayout>
               </RoleProtectedRoute>
             } />

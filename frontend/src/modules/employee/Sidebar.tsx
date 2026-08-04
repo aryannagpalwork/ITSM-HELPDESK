@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useApp } from '../../shared/AppContext';
-import { ThemeSelector } from '../../shared/ThemeSelector';
 import { 
   LayoutDashboard, 
   MessageSquareCode, 
@@ -180,25 +179,6 @@ export const EmployeeSidebar: React.FC = () => {
                 <KeyRound className="w-3.5 h-3.5" style={{ color: 'var(--accent-primary)' }} />
                 <span>Change password</span>
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setProfileMenuOpen(false);
-                  logout();
-                  navigate('/');
-                }}
-                className="w-full flex items-center gap-2 px-3 py-2.5 text-xs font-medium transition-colors"
-                style={{ color: 'var(--text-primary)' }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--sidebar-hover)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                }}
-              >
-                <LogOut className="w-3.5 h-3.5" style={{ color: 'var(--text-tertiary)' }} />
-                <span>Exit Workstation</span>
-              </button>
             </div>
           )}
 
@@ -247,9 +227,19 @@ export const EmployeeSidebar: React.FC = () => {
                 </p>
               </div>
             </div>
-            <ThemeSelector compact />
           </button>
         </div>
+        <button
+          type="button"
+          onClick={() => { logout(); navigate('/'); }}
+          className="w-full flex items-center gap-2 px-3 py-2.5 mt-3 text-xs font-medium rounded-lg transition-colors"
+          style={{ color: 'var(--text-secondary)' }}
+          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--sidebar-hover)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+        >
+          <LogOut className="w-3.5 h-3.5" style={{ color: 'var(--text-tertiary)' }} />
+          <span>Exit Workspace</span>
+        </button>
       </div>
     </div>
   );

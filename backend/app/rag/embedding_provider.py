@@ -1,6 +1,7 @@
 """Embedding provider interface for RAG pipeline."""
 
 import logging
+import os
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -148,6 +149,10 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         settings = get_settings()
         self.api_key = api_key or settings.openai_api_key
         self.model_name = model_name or settings.embedding_model
+        # Keep the embedding width aligned with the persisted FAISS index.
+        # text-embedding-3-* supports dimensionality reduction; the existing
+        # index was built with 1536-dimensional vectors.
+        self.dimensions = int(os.getenv("EMBEDDING_DIMENSION", "1536"))
         
         if not self.api_key:
             raise ValueError("OPENAI_API_KEY must be set.")
@@ -164,10 +169,10 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         """Generate embedding for a single text using OpenAI."""
         start_time = time.time()
         try:
-            response = self.client.embeddings.create(
-                model=self.model_name,
-                input=text
-            )
+            request = {"model": self.model_name, "input": text}
+            if self.model_name.startswith("text-embedding-3-"):
+                request["dimensions"] = self.dimensions
+            response = self.client.embeddings.create(**request)
             embedding = response.data[0].embedding
             token_count = response.usage.total_tokens
             
@@ -191,10 +196,10 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         """Generate embeddings for multiple texts in batch using OpenAI."""
         start_time = time.time()
         try:
-            response = self.client.embeddings.create(
-                model=self.model_name,
-                input=texts
-            )
+            request = {"model": self.model_name, "input": texts}
+            if self.model_name.startswith("text-embedding-3-"):
+                request["dimensions"] = self.dimensions
+            response = self.client.embeddings.create(**request)
             embeddings = [item.embedding for item in response.data]
             total_tokens = response.usage.total_tokens
             

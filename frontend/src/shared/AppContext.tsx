@@ -37,6 +37,7 @@ interface AppContextType {
   refreshRoleKPIs: () => Promise<void>;
   createTicket: (ticket: Partial<Ticket>, reason?: string) => Promise<Ticket>;
   updateTicket: (id: string, updates: Partial<Ticket>, reason?: string) => Promise<void>;
+  assignTicket: (id: string, assignedTo?: string, reason?: string) => Promise<void>;
   reassignTicket: (id: string, assignedTo?: string, reason?: string) => Promise<void>;
   listAgents: () => Promise<{ id: string; name: string; email: string; department?: string; specialization?: string; status: string; activeTicketCount: number; available: boolean }[]>;
   escalateTicket: (id: string, priority: string, reason?: string) => Promise<void>;
@@ -254,6 +255,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateTicket = async (id: string, updates: Partial<Ticket>, reason?: string) => {
     const updatedTicket = await ticketApi.updateTicket(id, updates, reason);
+    setTickets(prev => prev.map(t => (t.id === id ? updatedTicket : t)));
+    await refreshRoleKPIs();
+  };
+
+  const assignTicket = async (id: string, assignedTo?: string, reason?: string) => {
+    const updatedTicket = await ticketApi.assignTicket(id, assignedTo, reason);
     setTickets(prev => prev.map(t => (t.id === id ? updatedTicket : t)));
     await refreshRoleKPIs();
   };
@@ -484,6 +491,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         refreshRoleKPIs,
         createTicket,
         updateTicket,
+        assignTicket,
         reassignTicket,
         listAgents,
         escalateTicket,

@@ -192,6 +192,12 @@ class FAISSVectorStore(VectorStore):
         
         # Prepare query
         query_vec = np.array([query_embedding]).astype('float32')
+        if query_vec.shape[1] != self._index.d:
+            raise VectorStoreError(
+                "Embedding dimension mismatch: "
+                f"query={query_vec.shape[1]}, index={self._index.d}. "
+                "Re-index the knowledge base with the configured embedding model."
+            )
         faiss.normalize_L2(query_vec)
         
         # Calculate how many results to retrieve (adjust for filter)
@@ -376,6 +382,12 @@ class FAISSVectorStore(VectorStore):
             # Load FAISS index
             import faiss
             self._index = faiss.read_index(str(load_path / "faiss.index"))
+
+            if self._index.d != self.dimension:
+                raise VectorStoreError(
+                    "Stored FAISS index dimension does not match the configured "
+                    f"embedding dimension: index={self._index.d}, configured={self.dimension}."
+                )
             
             # Load chunk data
             with open(load_path / "chunks.pkl", "rb") as f:
