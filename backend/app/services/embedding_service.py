@@ -27,6 +27,9 @@ from app.rag.text_extractor import (
 )
 from app.rag.chunker import RecursiveCharacterTextSplitter
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class EmbeddingService:
@@ -98,27 +101,69 @@ class EmbeddingService:
         # Load document
         from app.rag.document_loader import FileDocumentLoader
         loader = FileDocumentLoader()
+        logger.info("Knowledge-base parser selection: document_id=%s extension=%s", db_doc.id, file_path.suffix.lower())
         loaded_doc = loader.load(file_path)
-        
+
         # Get text extractor
         text_extractor = self.text_extractor_registry.get_extractor(loaded_doc)
         if not text_extractor:
             raise ValueError(f"Unsupported document type: {file_path.suffix}")
-        
+        logger.info(
+            "Knowledge-base parser selected: document_id=%s parser=%s",
+            db_doc.id,
+            type(text_extractor).__name__,
+        )
+
+        # Keep document metadata available to every persisted chunk.
+        loaded_doc.metadata.category = getattr(db_doc, "category", None)
+        loaded_doc.metadata.tags = list(getattr(db_doc, "tags", []) or [])
+        loaded_doc.metadata.additional_metadata.update({
+            "document_id": db_doc.id,
+            "filename": getattr(db_doc, "filename", loaded_doc.metadata.file_name),
+            "title": getattr(db_doc, "title", loaded_doc.metadata.file_name),
+            "category": getattr(db_doc, "category", None),
+            "uploaded_by": getattr(db_doc, "uploaded_by", None),
+            "created_at": getattr(db_doc, "uploaded_at", None),
+            "processing_status": "processing",
+        })
+
         # Extract text
         extracted_text = text_extractor.extract(loaded_doc)
+        extracted_length = len(extracted_text.text.strip())
+        logger.info(
+            "Knowledge-base text extracted: document_id=%s characters=%d",
+            db_doc.id,
+            extracted_length,
+        )
+        if extracted_length == 0:
+            raise ValueError("Document text extraction returned no readable text")
         
         # Chunk document
         chunks = self.chunker.chunk_extracted(extracted_text, loaded_doc.metadata)
-        
+        logger.info("Knowledge-base chunks generated: document_id=%s count=%d", db_doc.id, len(chunks))
+        if not chunks:
+            raise ValueError("Document text could not be split into chunks")
+
         # Set document ID on chunks
         for chunk in chunks:
             chunk.document_id = db_doc.id
-        
+
         # Generate embeddings
         texts = [chunk.text for chunk in chunks]
+        if any(not text.strip() for text in texts):
+            raise ValueError("Document contains an empty chunk")
         batch_embeddings = self.embedding_provider.embed_batch(texts)
-        
+        embedding_count = len(batch_embeddings.embeddings)
+        logger.info(
+            "Knowledge-base embeddings generated: document_id=%s count=%d",
+            db_doc.id,
+            embedding_count,
+        )
+        if embedding_count != len(chunks) or any(not embedding for embedding in batch_embeddings.embeddings):
+            raise ValueError(
+                f"Embedding count mismatch: chunks={len(chunks)}, embeddings={embedding_count}"
+            )
+
         # Assign embeddings to chunks
         for i, chunk in enumerate(chunks):
             chunk.embedding = batch_embeddings.embeddings[i]
@@ -129,6 +174,11 @@ class EmbeddingService:
         
         # Add to vector store
         self.vector_store.add_chunks(chunks)
+        logger.info(
+            "Knowledge-base vectors inserted: document_id=%s count=%d",
+            db_doc.id,
+            len(chunks),
+        )
         
         return chunks
     
@@ -231,3 +281,10 @@ class EmbeddingService:
         
         if docs_to_insert:
             await self.db["document_chunks"].insert_many(docs_to_insert)
+            logger.info(
+                "Knowledge-base chunks persisted: document_id=%s count=%d",
+                document_id,
+                len(docs_to_insert),
+            )
+        else:
+            raise ValueError(f"No chunks generated for document {document_id}")

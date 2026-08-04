@@ -23,7 +23,9 @@ class RetrievedContext:
 class RetrievalConfig:
     """Configuration for retrieval operations."""
     top_k: int = 5
-    similarity_threshold: float = 0.7
+    # 0.5 preserves semantically valid short support queries such as
+    # "My printer is not working" (measured similarity ~0.55).
+    similarity_threshold: float = 0.5
     filter_metadata: Optional[dict[str, Any]] = None
     rerank: bool = False
     max_tokens: Optional[int] = None

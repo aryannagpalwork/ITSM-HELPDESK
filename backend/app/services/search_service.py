@@ -9,6 +9,9 @@ from app.config.settings import get_settings
 from app.rag.retriever import FAISSRetriever, RetrievalConfig, RetrievedContext
 from app.rag.embedding_provider import EmbeddingProviderFactory
 from app.rag.vector_store import VectorStoreFactory
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class SearchService:
@@ -62,4 +65,16 @@ class SearchService:
             top_k=top_k,
             similarity_threshold=similarity_threshold,
         )
-        return self.retriever.retrieve(query, config)
+        try:
+            context = self.retriever.retrieve(query, config)
+            logger.info(
+                "Knowledge-base retrieval: query=%r threshold=%s results=%d scores=%s",
+                query,
+                similarity_threshold,
+                context.total_retrieved,
+                [round(result.similarity_score, 4) for result in context.search_results],
+            )
+            return context
+        except Exception:
+            logger.exception("Knowledge-base retrieval failed: query=%r", query)
+            raise

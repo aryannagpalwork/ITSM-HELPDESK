@@ -1,5 +1,6 @@
 import re
 from uuid import uuid4
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 import json
 from datetime import datetime
@@ -30,7 +31,47 @@ from app.rag.prompt_builder import (
     PromptBuilderFactory,
     ChatMessage,
     MessageRole,
+    BuiltPrompt,
 )
+from app.rag.config import get_rag_settings
+from app.rag.retriever import RetrievedContext
+
+logger = logging.getLogger(__name__)
+
+NO_KB_MATCH_RESPONSE = (
+    "I couldn't find this information in the Knowledge Base. "
+    "Please raise a support ticket if you need further assistance."
+)
+
+GREETING_PHRASES = {
+    "hello", "hi", "hey", "good morning", "good afternoon", "thanks",
+    "thank you", "bye",
+}
+
+
+def _classify_query(query: str) -> str:
+    normalized = re.sub(r"[^a-z\s]", "", query.lower()).strip()
+    if normalized in GREETING_PHRASES:
+        return "GREETING"
+    return "KNOWLEDGE_QUERY"
+
+
+def _greeting_prompt(query: str) -> BuiltPrompt:
+    context = RetrievedContext(chunks=[], search_results=[], total_retrieved=0)
+    return BuiltPrompt(
+        messages=[
+            ChatMessage(
+                role=MessageRole.SYSTEM,
+                content=(
+                    "You are a friendly IT support assistant. Respond naturally and briefly to this greeting. "
+                    "Do not provide technical facts, troubleshooting, or information not requested."
+                ),
+            ),
+            ChatMessage(role=MessageRole.USER, content=query),
+        ],
+        context_used=context,
+        metadata={"query_type": "GREETING"},
+    )
 
 # ──────────────────────────────────────────────
 # Password-Reset Intent Detection & Flow Helpers
@@ -372,6 +413,49 @@ async def chat(
     settings = get_settings()
     session_id = payload.session_id or str(uuid4())
 
+    query_type = _classify_query(payload.query)
+    logger.debug("Chat query type=%s query=%r", query_type, payload.query)
+
+    if query_type == "GREETING":
+        logger.debug("Chat response source=Greeting kb_hit=false")
+        llm_service = LLMServiceFactory.create(settings.llm_provider)
+        answer, _ = llm_service.generate_response(_greeting_prompt(payload.query))
+        await _save_chat_messages(db, session_id, payload.query, answer, {
+            "query_type": query_type,
+            "response_source": "Greeting",
+            "retrieved_documents": 0,
+            "kb_hit": False,
+        })
+        return ChatResponse(
+            answer=answer, sources=[], confidence=1.0,
+            retrieved_documents=0, session_id=session_id, suggested_ticket=None,
+        )
+
+    # All non-greeting queries search the existing KB before response generation.
+    configured_threshold = get_rag_settings().similarity_threshold
+    retrieval_threshold = (
+        payload.similarity_threshold
+        if payload.similarity_threshold > 0
+        else configured_threshold
+    )
+    try:
+        search_service = SearchService(db=db)
+        retrieved_context = search_service.search(
+            query=payload.query,
+            top_k=payload.top_k,
+            similarity_threshold=retrieval_threshold,
+        )
+        logger.debug(
+            "Chat retrieval query_type=%s threshold=%s scores=%s documents=%s",
+            query_type,
+            retrieval_threshold,
+            [round(result.similarity_score, 4) for result in retrieved_context.search_results],
+            len(retrieved_context.chunks),
+        )
+    except Exception:
+        logger.exception("Chat retrieval failed query_type=%s", query_type)
+        retrieved_context = RetrievedContext(chunks=[], search_results=[], total_retrieved=0)
+
     # ── Step 0: Password-Reset Intent Detection (pre-RAG) ──
     intent = _detect_password_reset_intent(payload.query)
     current_state, state_metadata = await _get_password_reset_state(db, payload.session_id)
@@ -401,6 +485,7 @@ async def chat(
             if raw_token and new_state == "token_generated":
                 metadata["password_reset_token"] = raw_token
             await _save_chat_messages(db, session_id, payload.query, answer, metadata)
+            logger.debug("Chat response source=Knowledge Base-compatible password flow kb_hit=%s", bool(retrieved_context.chunks))
             return _make_password_reset_response(answer, new_state)
 
     # Handle reset-password flow (user has a token)
@@ -411,20 +496,15 @@ async def chat(
         if answer:
             metadata = {"password_reset_state": new_state}
             await _save_chat_messages(db, session_id, payload.query, answer, metadata)
+            logger.debug("Chat response source=Knowledge Base-compatible password flow kb_hit=%s", bool(retrieved_context.chunks))
             return _make_password_reset_response(answer, new_state)
 
     # ── Standard RAG Pipeline (for non-password-reset queries) ──
 
-    # Step 1: Retrieve relevant chunks
-    search_service = SearchService(db=db)
-    retrieved_context = search_service.search(
-        query=payload.query,
-        top_k=payload.top_k,
-        similarity_threshold=payload.similarity_threshold,
-    )
-
-    # Step 2: Build the prompt
-    prompt_builder = PromptBuilderFactory.create("rag")
+    # The retrieval result above is authoritative for the response path.
+    kb_hit = bool(retrieved_context.chunks)
+    response_query_type = query_type if kb_hit else "OUT_OF_SCOPE"
+    llm_service = None
 
     # Convert chat history
     chat_history = []
@@ -436,23 +516,42 @@ async def chat(
         )
         chat_history.append(ChatMessage(role=role, content=msg.content))
 
-    built_prompt = prompt_builder.build(
-        query=payload.query,
-        context=retrieved_context,
-        chat_history=chat_history,
-    )
-
-    # Step 3: Call LLM to generate response
-    llm_service = LLMServiceFactory.create(settings.llm_provider)
-    answer, _ = llm_service.generate_response(built_prompt)
-
-    # Step 4: Calculate confidence score based on similarity scores
+    # Calculate confidence from the already threshold-filtered results.
     confidence = 0.0
     if retrieved_context.search_results:
         avg_similarity = sum(
             r.similarity_score for r in retrieved_context.search_results
         ) / len(retrieved_context.search_results)
         confidence = avg_similarity
+
+    if kb_hit:
+        prompt_builder = PromptBuilderFactory.create("rag")
+        built_prompt = prompt_builder.build(
+            query=payload.query,
+            context=retrieved_context,
+            chat_history=chat_history,
+        )
+        built_prompt.messages[0].content += (
+            "\n\nSTRICT KNOWLEDGE BASE GROUNDING:\n"
+            "Answer only using the retrieved Knowledge Base context in this prompt. "
+            "You may summarize, explain, format, or restructure it, but must not add "
+            "external facts or rely on world knowledge. If the context does not answer "
+            "the question, say that the Knowledge Base does not contain the information."
+        )
+        llm_service = LLMServiceFactory.create(settings.llm_provider)
+        answer, _ = llm_service.generate_response(built_prompt)
+        logger.debug(
+            "Chat response source=Knowledge Base kb_hit=true scores=%s documents=%s",
+            [round(result.similarity_score, 4) for result in retrieved_context.search_results],
+            len(retrieved_context.chunks),
+        )
+    else:
+        answer = NO_KB_MATCH_RESPONSE
+        logger.debug(
+            "Chat response source=No KB Match query_type=%s kb_hit=false threshold=%s documents=0",
+            response_query_type,
+            retrieval_threshold,
+        )
 
     # Step 5: Prepare sources
     # Fetch all documents in one query for efficiency
@@ -504,6 +603,8 @@ async def chat(
             full_chat_history.append(ChatMessage(role=MessageRole.USER, content=payload.query))
 
             # Generate suggested ticket
+            if llm_service is None:
+                llm_service = LLMServiceFactory.create(settings.llm_provider)
             suggested_ticket, _ = llm_service.generate_ticket_details(full_chat_history)
 
     # Step 7: Save chat history
@@ -519,6 +620,9 @@ async def chat(
 
     # Save assistant message
     assistant_metadata = {
+        "query_type": response_query_type,
+        "response_source": "Knowledge Base" if kb_hit else "No KB Match",
+        "kb_hit": kb_hit,
         "sources": [s.model_dump() for s in sources],
         "confidence": confidence,
         "retrieved_documents": len(sources),

@@ -95,8 +95,11 @@ async def upload_document(
     category: str | None = Form(None),
     tags: str | None = Form(None),  # Comma-separated tags
 ) -> KnowledgeDocumentRead:
+    logger.info("Knowledge-base upload received: filename=%s", file.filename)
+
     # Validate extension
-    filename = file.filename or f"unknown_{uuid4()}"
+    raw_filename = file.filename or f"unknown_{uuid4()}"
+    filename = Path(raw_filename).name
     ext = Path(filename).suffix.lower()
     if ext not in SUPPORTED_EXTENSIONS:
         raise HTTPException(
@@ -111,6 +114,12 @@ async def upload_document(
     with open(file_path, "wb") as f:
         f.write(content)
     file_size = os.path.getsize(file_path)
+    logger.info(
+        "Knowledge-base file saved: filename=%s path=%s size=%d bytes",
+        filename,
+        file_path,
+        file_size,
+    )
 
     # Parse tags
     tag_list = []
@@ -131,7 +140,8 @@ async def upload_document(
         "tags": tag_list,
         "uploaded_by": current_user.get("full_name") or current_user.get("email"),
         "uploaded_at": now,
-        "status": "processing",
+        "status": "uploaded",
+        "processing_status": "uploaded",
         "file_path": str(saved_filename),
         "file_size": file_size,
         "created_at": now,
@@ -139,29 +149,72 @@ async def upload_document(
     }
     await db["knowledge_documents"].insert_one(db_doc)
     db_doc["id"] = db_doc["_id"]
+    logger.info("Knowledge-base document created: document_id=%s status=uploaded", doc_id)
 
     # Process and index
+    embedding_service = None
     try:
+        await db["knowledge_documents"].update_one(
+            {"_id": doc_id},
+            {"$set": {
+                "status": "processing",
+                "processing_status": "processing",
+                "updated_at": datetime.utcnow().isoformat(),
+            }},
+        )
+        db_doc["status"] = "processing"
+        logger.info("Knowledge-base processing started: document_id=%s status=processing", doc_id)
+
         # Compatibility object with .id
         class DocObj:
-            id = doc_id
+            pass
+
+        document_info = DocObj()
+        document_info.id = doc_id
+        document_info.title = doc_title
+        document_info.filename = filename
+        document_info.category = category
+        document_info.tags = tag_list
+        document_info.uploaded_by = db_doc["uploaded_by"]
+        document_info.uploaded_at = now
 
         embedding_service = EmbeddingService(db=db)
-        await embedding_service.index_document(DocObj(), file_path)
+        await embedding_service.index_document(document_info, file_path)
         embedding_service.save_index()
+        logger.info("Knowledge-base vector index saved: document_id=%s", doc_id)
         # Update status to processed
         await db["knowledge_documents"].update_one(
             {"_id": doc_id},
-            {"$set": {"status": "processed", "updated_at": datetime.utcnow().isoformat()}}
+            {"$set": {
+                "status": "processed",
+                "processing_status": "processed",
+                "updated_at": datetime.utcnow().isoformat(),
+            }}
         )
         db_doc["status"] = "processed"
+        logger.info("Knowledge-base processing completed: document_id=%s status=processed", doc_id)
     except Exception as e:
-        logger.error(f"Error processing document {doc_id}: {e}")
+        logger.exception("Knowledge-base processing failed: document_id=%s", doc_id)
+        if embedding_service is not None:
+            try:
+                await embedding_service.delete_document(doc_id)
+                embedding_service.save_index()
+                logger.info("Knowledge-base failed processing cleanup completed: document_id=%s", doc_id)
+            except Exception:
+                logger.exception("Knowledge-base failed processing cleanup failed: document_id=%s", doc_id)
         await db["knowledge_documents"].update_one(
             {"_id": doc_id},
-            {"$set": {"status": "error", "updated_at": datetime.utcnow().isoformat()}}
+            {"$set": {
+                "status": "failed",
+                "processing_status": "failed",
+                "updated_at": datetime.utcnow().isoformat(),
+            }}
         )
-        db_doc["status"] = "error"
+        db_doc["status"] = "failed"
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Document processing failed: {str(e)}",
+        ) from e
 
     return db_doc
 
@@ -274,4 +327,3 @@ async def semantic_search(
         results=results,
         metadata=retrieved_context.metadata,
     )
-

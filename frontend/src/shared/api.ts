@@ -862,35 +862,72 @@ export const uploadKnowledgeDocument = async (
   if (category) formData.append('category', category);
   if (tags?.length) formData.append('tags', tags.join(','));
 
-  const response = await apiFetch(`${API_BASE_URL}/knowledge/upload`, {
+  const requestUrl = `${API_BASE_URL}/knowledge/upload`;
+  const requestPayload = {
+    file: {
+      name: file.name,
+      type: file.type,
+      size: file.size,
+    },
+    title: title || null,
+    category: category || null,
+    tags: tags || [],
+  };
+
+  console.log('[KnowledgeBase Upload] Request', {
+    url: requestUrl,
     method: 'POST',
-    body: formData,
+    headers: getAccessToken() ? { Authorization: 'Bearer <present>' } : {},
+    payload: requestPayload,
+    hasAuthorization: Boolean(getAccessToken()),
+    contentType: 'browser-managed multipart/form-data',
   });
 
-  if (!response.ok) {
-    let errorMessage = 'Upload failed';
-    try {
-      const errorData = await response.json();
-      if (errorData.detail) {
-        if (Array.isArray(errorData.detail)) {
-          // FastAPI validation error array
-          errorMessage = errorData.detail.map((err: any) => err.msg || String(err)).join(', ');
-        } else if (typeof errorData.detail === 'string') {
-          // Simple string detail
-          errorMessage = errorData.detail;
-        } else if (errorData.message) {
-          // Message field
-          errorMessage = errorData.message;
-        }
-      }
-    } catch {
-      // Fallback if json parsing fails
-      errorMessage = 'Upload failed';
-    }
-    throw new Error(errorMessage);
-  }
+  try {
+    // Do not set Content-Type manually: fetch adds multipart boundaries for FormData.
+    const response = await apiFetch(requestUrl, {
+      method: 'POST',
+      body: formData,
+    });
 
-  return await response.json();
+    console.log('[KnowledgeBase Upload] Response', {
+      url: requestUrl,
+      status: response.status,
+      ok: response.ok,
+      response,
+    });
+
+    if (!response.ok) {
+      let errorMessage = 'Upload failed';
+      try {
+        const errorData = await response.json();
+        if (errorData.detail) {
+          if (Array.isArray(errorData.detail)) {
+            // FastAPI validation error array
+            errorMessage = errorData.detail.map((err: any) => err.msg || String(err)).join(', ');
+          } else if (typeof errorData.detail === 'string') {
+            // Simple string detail
+            errorMessage = errorData.detail;
+          } else if (errorData.message) {
+            errorMessage = errorData.message;
+          }
+        }
+      } catch {
+        // Fallback if json parsing fails
+        errorMessage = 'Upload failed';
+      }
+      throw new Error(errorMessage);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('[KnowledgeBase Upload] Error', {
+      url: requestUrl,
+      payload: requestPayload,
+      error,
+    });
+    throw error;
+  }
 };
 
 export const deleteKnowledgeDocument = async (documentId: number): Promise<void> => {
