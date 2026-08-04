@@ -38,7 +38,7 @@ export const AdminDashboard: React.FC = () => {
   const activeUsers = allUsers.filter(u => (u.status === 'APPROVED' || u.status === 'ACTIVE') && u.is_active);
   const inactiveUsers = allUsers.filter(u => u.status === 'INACTIVE' || u.status === 'DISABLED' || u.status === 'REJECTED' || (!u.is_active && u.status !== 'PENDING'));
   const agentCount = allUsers.filter(u => String(u.role).toLowerCase() === 'agent').length;
-  const agentCount = allUsers.filter(u => u.role === 'Agent').length;
+  
 
   return (
     <div id="admin-command-center" className="flex-1 bg-zinc-950 p-8 overflow-y-auto h-screen font-sans">

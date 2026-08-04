@@ -1,6 +1,22 @@
-import { Ticket, TicketComment, TicketPriority, TicketStatus, ChatRequest, ChatResponse, User, EmployeeKPIs, AgentKPIs, AdminKPIs, TimelineRange, TicketLifecycleTimeline, AICopilotTimeline, LeaveRequest, AgentAvailability, CurrentlyOnLeave } from './types';
-import { Ticket, TicketComment, TicketPriority, TicketStatus, ChatRequest, ChatResponse, User, EmployeeKPIs, AgentKPIs, AdminKPIs, AdminAnalytics, TimelineRange, TicketLifecycleTimeline, AICopilotTimeline } from './types';
-
+import {
+  Ticket,
+  TicketComment,
+  TicketPriority,
+  TicketStatus,
+  ChatRequest,
+  ChatResponse,
+  User,
+  EmployeeKPIs,
+  AgentKPIs,
+  AdminKPIs,
+  AdminAnalytics,
+  TimelineRange,
+  TicketLifecycleTimeline,
+  AICopilotTimeline,
+  LeaveRequest,
+  AgentAvailability,
+  CurrentlyOnLeave,
+} from './types';
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 const ACCESS_TOKEN_KEY = 'it_copilot_access_token';
 const REFRESH_TOKEN_KEY = 'it_copilot_refresh_token';
