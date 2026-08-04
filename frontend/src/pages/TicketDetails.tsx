@@ -2,11 +2,10 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '../shared/AppContext';
-import { TicketPriority, TicketStatus } from '../shared/types';
+import { AgentAvailability, TicketPriority, TicketStatus } from '../shared/types';
 import {
   Sparkles,
   ArrowLeft,
-  Clock,
   Send,
   Lock,
   UserCircle2,
@@ -23,7 +22,7 @@ import {
   Loader2,
   Check,
 } from 'lucide-react';
-import { AuditLog } from '../shared/api';
+import { AuditLog, getAgentsAvailability } from '../shared/api';
 
 export const TicketDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -36,10 +35,8 @@ export const TicketDetails: React.FC = () => {
     deleteTicket,
     addComment,
     loadTicketAuditLogs,
+    assignTicket,
     reassignTicket,
-    listAgents,
-    loadAgentMetrics,
-    loadTickets,
     escalateTicket,
     resolveTicket,
     closeTicket,
@@ -52,7 +49,7 @@ export const TicketDetails: React.FC = () => {
   const [loading, setLoading] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [modal, setModal] = useState<{
-    action: 'escalate' | 'resolve' | 'close' | 'reopen' | 'reassign';
+    action: 'assign' | 'escalate' | 'resolve' | 'close' | 'reopen' | 'reassign';
     isOpen: boolean;
   } | null>(null);
   const [modalData, setModalData] = useState<{
@@ -64,7 +61,7 @@ export const TicketDetails: React.FC = () => {
     resolution: '',
     assignedTo: null,
   });
-  const [agents, setAgents] = useState<{ id: string; name: string; email: string; department?: string; specialization?: string; status: string; activeTicketCount: number; available: boolean }[]>([]);
+  const [agents, setAgents] = useState<AgentAvailability[]>([]);
 
   const ticket = tickets.find((t) => t.id === id);
 
@@ -112,18 +109,25 @@ export const TicketDetails: React.FC = () => {
     updateTicket(ticket.id, { priority });
   };
 
-  const handleReassign = async () => {
-    setModal({ action: 'reassign', isOpen: true });
-    setModalData({ reason: '', resolution: '', assignedTo: null });
+  const openAssignmentModal = async (action: 'assign' | 'reassign') => {
+    setModal({ action, isOpen: true });
+    setModalData({
+      reason: '',
+      resolution: '',
+      assignedTo: currentUser.role === 'Agent' ? currentUser.id : null,
+    });
+
+    if (currentUser.role !== 'Administrator') {
+      setAgents([]);
+      return;
+    }
+
     try {
-      const agentsList = await listAgents();
-      console.log('[Reassign] API response - agentsList:', agentsList);
-      // Only exclude the current assignee; the current user may not be the assignee
-      const filtered = agentsList.filter(a => a.id !== ticket?.agentId);
-      console.log('[Reassign] Filtered agents (excluded current assignee):', filtered);
+      const agentsList = await getAgentsAvailability();
+      const filtered = agentsList.filter(agent => agent.agentId !== ticket?.agentId);
       setAgents(filtered);
     } catch (err) {
-      console.error('[Reassign] Error fetching agents:', err);
+      console.error('[Assignment] Error fetching agents availability:', err);
       setAgents([]);
     }
   };
@@ -149,6 +153,10 @@ export const TicketDetails: React.FC = () => {
     setLoading(modal.action);
     try {
       switch (modal.action) {
+        case 'assign':
+          await assignTicket(ticket.id, modalData.assignedTo || undefined, modalData.reason || undefined);
+          setToast({ message: 'Ticket assigned successfully!', type: 'success' });
+          break;
         case 'reassign':
           if (!modalData.assignedTo) {
             setToast({ message: 'Please select a target agent.', type: 'error' });
@@ -198,6 +206,7 @@ export const TicketDetails: React.FC = () => {
   const isSubmitDisabled = () => {
     if (!modal) return true;
     if (isReasonRequired(modal.action) && !modalData.reason.trim()) return true;
+    if ((modal.action === 'assign' || modal.action === 'reassign') && !modalData.assignedTo) return true;
     return false;
   };
 
@@ -331,7 +340,7 @@ export const TicketDetails: React.FC = () => {
                 </div>
               )}
 
-              {modal.action === 'reassign' && (
+              {currentUser.role === 'Administrator' && (modal.action === 'assign' || modal.action === 'reassign') && (
                 <div>
                   <label className="block text-xs font-mono text-secondary uppercase tracking-wider mb-1.5">
                     Select Target Agent
@@ -348,28 +357,27 @@ export const TicketDetails: React.FC = () => {
                     >
                       <option value="">-- Select an agent --</option>
                       {agents.map((agent) => (
-                        <option key={agent.id} value={agent.id}>
-                          {agent.name} {agent.specialization ? `(${agent.specialization})` : ''} - {agent.activeTicketCount} active tickets
+                        <option key={agent.agentId} value={agent.agentId}>
+                          {agent.name} - {agent.openTicketCount} open tickets{agent.onLeaveToday ? ' - On leave' : ''}
                         </option>
                       ))}
                     </select>
                   )}
-                  {modalData.assignedTo && agents.find(a => a.id === modalData.assignedTo) && (
+                  {modalData.assignedTo && agents.find(a => a.agentId === modalData.assignedTo) && (
                     <div className="mt-2 p-2 bg-input border border-token rounded-lg">
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-xs text-secondary font-semibold">
-                            {agents.find(a => a.id === modalData.assignedTo)?.name}
+                            {agents.find(a => a.agentId === modalData.assignedTo)?.name}
                           </p>
-                          <p className="text-[9px] text-tertiary">
-                            {agents.find(a => a.id === modalData.assignedTo)?.specialization || 'General'} 
-                            {' · '}
-                            {agents.find(a => a.id === modalData.assignedTo)?.activeTicketCount} active tickets
-                            {' · '}
-                            <span className={agents.find(a => a.id === modalData.assignedTo)?.available ? 'text-emerald-400' : 'text-amber-400'}>
-                              {agents.find(a => a.id === modalData.assignedTo)?.available ? 'Available' : 'Busy'}
-                            </span>
-                          </p>
+                          <div className="text-[9px] text-tertiary flex items-center gap-2 flex-wrap">
+                            <span>{agents.find(a => a.agentId === modalData.assignedTo)?.openTicketCount} open tickets</span>
+                            {agents.find(a => a.agentId === modalData.assignedTo)?.onLeaveToday && (
+                              <span className="text-[8px] font-mono uppercase px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                On leave
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -852,20 +860,12 @@ export const TicketDetails: React.FC = () => {
                     </div>
                     <div>
                       <h5 className="text-[11px] font-semibold text-primary">{ticket.agentName}</h5>
-                      <p className="text-[9px] text-tertiary font-mono">
-                        {ticket.assignmentType || 'Automatic'} assignment
-                        {ticket.matchedSpecialization ? ` · ${ticket.matchedSpecialization}` : ''}
-                      </p>
-                      {ticket.assignedAt && (
-                        <p className="text-[9px] text-tertiary mt-0.5">
-                          {new Date(ticket.assignedAt).toLocaleString()}
-                        </p>
-                      )}
+                      <p className="text-[9px] text-tertiary font-mono">Assigned Service Agent</p>
                     </div>
                   </div>
-                  {currentUser.role !== 'Employee' && (
+                  {currentUser.role === 'Administrator' && (
                     <button
-                      onClick={handleReassign}
+                      onClick={() => openAssignmentModal('reassign')}
                       disabled={loading === 'reassign'}
                       className="w-full py-2 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 hover:text-amber-200 rounded-lg text-[10px] font-semibold flex items-center justify-center space-x-1.5 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
@@ -884,7 +884,20 @@ export const TicketDetails: React.FC = () => {
                     <UserCircle2 className="w-6 h-6 text-tertiary mx-auto mb-1" />
                     <p className="text-[10px] text-tertiary">Currently Unassigned</p>
                   </div>
-                  <p className="text-[10px] text-tertiary">The assignment engine will retry when an eligible agent is available.</p>
+                  {currentUser.role !== 'Employee' && (
+                    <button
+                      onClick={() => openAssignmentModal('assign')}
+                      disabled={loading === 'assign'}
+                      className="w-full py-2 bg-accent-soft hover-elev border border-token-strong text-accent hover-text rounded-lg text-[10px] font-semibold flex items-center justify-center space-x-1.5 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {loading === 'assign' ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <UserCheck className="w-3.5 h-3.5" />
+                      )}
+                      <span>{currentUser.role === 'Administrator' ? 'Assign Ticket' : 'Claim Ownership'}</span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>

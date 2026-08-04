@@ -1,3 +1,4 @@
+import { Ticket, TicketComment, TicketPriority, TicketStatus, ChatRequest, ChatResponse, User, EmployeeKPIs, AgentKPIs, AdminKPIs, TimelineRange, TicketLifecycleTimeline, AICopilotTimeline, LeaveRequest, AgentAvailability, CurrentlyOnLeave } from './types';
 import { Ticket, TicketComment, TicketPriority, TicketStatus, ChatRequest, ChatResponse, User, EmployeeKPIs, AgentKPIs, AdminKPIs, AdminAnalytics, TimelineRange, TicketLifecycleTimeline, AICopilotTimeline } from './types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
@@ -135,10 +136,6 @@ interface BackendTicket {
   status: 'Open' | 'In Progress' | 'Resolved' | 'Closed';
   assigned_to?: string;
   assigned_to_name?: string;
-  assigned_at?: string;
-  assignment_type?: string;
-  assignment_reason?: string;
-  matched_specialization?: string;
   assigned_team?: string;
   created_by?: string;
   created_by_name?: string;
@@ -171,6 +168,36 @@ interface BackendTicketListResponse {
   page: number;
   page_size: number;
   pages: number;
+}
+
+interface BackendLeaveRequest {
+  id: string;
+  agent_id: string;
+  agent_name?: string;
+  start_date: string;
+  end_date: string;
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected';
+  requested_at: string;
+  reviewed_by?: string;
+  reviewed_at?: string;
+  rejection_reason?: string;
+}
+
+interface BackendAgentAvailability {
+  agent_id: string;
+  name: string;
+  on_leave_today: boolean;
+  open_ticket_count: number;
+}
+
+interface BackendCurrentlyOnLeave {
+  agent_id: string;
+  agent_name: string;
+  start_date: string;
+  end_date: string;
+  open_ticket_count: number;
+  status: 'on_leave';
 }
 
 export interface AuthUser {
@@ -230,6 +257,11 @@ export interface TicketQuery {
   assignment?: string;
   sortBy?: string;
   sortOrder?: 'asc' | 'desc';
+}
+
+export interface LeaveRequestQuery {
+  status?: 'pending' | 'approved' | 'rejected';
+  agentId?: string;
 }
 
 /**
@@ -483,86 +515,6 @@ export const listAllUsers = async (includeDeleted: boolean = false): Promise<(Us
   }));
 };
 
-export interface AdminAgent {
-  id: string;
-  full_name: string;
-  email: string;
-  department?: string;
-  specialization?: string | string[];
-  availability?: string;
-  max_capacity: number;
-  active_ticket_count: number;
-  total_assigned: number;
-  total_resolved: number;
-  last_assigned_at?: string;
-  status?: string;
-  is_active: boolean;
-}
-
-export interface AdminAgentTicket {
-  id: string;
-  ticket_number: string;
-  title: string;
-  category: string;
-  priority: string;
-  status: string;
-  employee_name?: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface AdminAgentTicketResponse {
-  items: AdminAgentTicket[];
-  total: number;
-  page: number;
-  page_size: number;
-  pages: number;
-  summary: Record<string, number>;
-}
-
-export const listAdminAgents = async (params: {
-  page?: number;
-  pageSize?: number;
-  search?: string;
-  department?: string;
-  specialization?: string;
-  availability?: string;
-} = {}): Promise<{ items: AdminAgent[]; total: number; page: number; page_size: number; pages: number }> => {
-  const query = new URLSearchParams({
-    page: String(params.page || 1), page_size: String(params.pageSize || 25),
-  });
-  if (params.search) query.set('search', params.search);
-  if (params.department) query.set('department', params.department);
-  if (params.specialization) query.set('specialization', params.specialization);
-  if (params.availability) query.set('availability', params.availability);
-  const response = await apiFetch(`${API_BASE_URL}/admin/agents?${query.toString()}`);
-  if (!response.ok) throw new Error(`Unable to fetch agents: ${response.status}`);
-  return await response.json();
-};
-
-export const getAdminAgent = async (agentId: string): Promise<AdminAgent> => {
-  const response = await apiFetch(`${API_BASE_URL}/admin/agents/${agentId}`);
-  if (!response.ok) throw new Error(`Unable to fetch agent: ${response.status}`);
-  return await response.json();
-};
-
-export const listAdminAgentTickets = async (agentId: string, params: {
-  page?: number;
-  pageSize?: number;
-  search?: string;
-  sortBy?: string;
-  sortOrder?: 'asc' | 'desc';
-} = {}): Promise<AdminAgentTicketResponse> => {
-  const query = new URLSearchParams({
-    page: String(params.page || 1), page_size: String(params.pageSize || 25),
-    sort_by: params.sortBy || 'created_at', sort_order: params.sortOrder || 'desc',
-  });
-  if (params.search) query.set('search', params.search);
-  const response = await apiFetch(`${API_BASE_URL}/admin/agents/${agentId}/tickets?${query.toString()}`);
-  if (!response.ok) throw new Error(`Unable to fetch assigned tickets: ${response.status}`);
-  return await response.json();
-};
-
 export const register = async (fullName: string, email: string, password: string, role: string): Promise<{ message: string }> => {
   const response = await fetch(`${API_BASE_URL}/auth/register`, {
     method: 'POST',
@@ -590,6 +542,78 @@ export const login = async (email: string, password: string): Promise<AuthUser> 
   const data = (await response.json()) as TokenResponse;
   setTokens(data.access_token, data.refresh_token);
   return mapUser(data.user);
+};
+
+export interface ForgotPasswordResult {
+  detail: string;
+  resetLink?: string | null;
+}
+
+export const forgotPassword = async (email: string): Promise<ForgotPasswordResult> => {
+  const response = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+
+  const data = await response.json().catch(() => ({ detail: 'Unable to process password reset request.' }));
+  if (!response.ok) {
+    throw new Error(data.detail || 'Unable to process password reset request.');
+  }
+
+  return {
+    detail: data.detail || 'If an account with that email exists, a password reset link has been sent.',
+    resetLink: data.reset_link || null,
+  };
+};
+
+export const resetPassword = async (
+  email: string,
+  token: string,
+  newPassword: string,
+  confirmPassword: string
+): Promise<{ detail: string }> => {
+  const response = await fetch(`${API_BASE_URL}/auth/reset-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email,
+      token,
+      new_password: newPassword,
+    }),
+  });
+
+  const data = await response.json().catch(() => ({ detail: 'Unable to reset password.' }));
+  if (!response.ok) {
+    const detail = data.detail;
+    const message = typeof detail === 'string' ? detail : JSON.stringify(detail);
+    throw new Error(message || 'Unable to reset password.');
+  }
+
+  return { detail: data.detail || 'Password has been reset successfully.' };
+};
+
+export const changePassword = async (
+  currentPassword: string,
+  newPassword: string,
+  confirmPassword: string
+): Promise<{ detail: string }> => {
+  const response = await apiFetch(`${API_BASE_URL}/auth/change-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword,
+      confirm_password: confirmPassword,
+    }),
+  });
+
+  const data = await response.json().catch(() => ({ detail: 'Unable to change password.' }));
+  if (!response.ok) {
+    throw new Error(data.detail || 'Unable to change password.');
+  }
+
+  return { detail: data.detail || 'Password changed successfully.' };
 };
 
 export const logout = async (): Promise<void> => {
@@ -652,10 +676,36 @@ export const mapTicket = (ticket: BackendTicket): Ticket => ({
   
   // Assigned team
   assignedTeam: ticket.assigned_team,
-  assignmentType: ticket.assignment_type,
-  assignmentReason: ticket.assignment_reason,
-  matchedSpecialization: ticket.matched_specialization,
-  assignedAt: ticket.assigned_at,
+});
+
+export const mapLeaveRequest = (leave: BackendLeaveRequest): LeaveRequest => ({
+  id: leave.id,
+  agentId: leave.agent_id,
+  agentName: leave.agent_name,
+  startDate: leave.start_date,
+  endDate: leave.end_date,
+  reason: leave.reason,
+  status: leave.status,
+  requestedAt: leave.requested_at,
+  reviewedBy: leave.reviewed_by,
+  reviewedAt: leave.reviewed_at,
+  rejectionReason: leave.rejection_reason,
+});
+
+export const mapAgentAvailability = (availability: BackendAgentAvailability): AgentAvailability => ({
+  agentId: availability.agent_id,
+  name: availability.name,
+  onLeaveToday: availability.on_leave_today,
+  openTicketCount: availability.open_ticket_count,
+});
+
+export const mapCurrentlyOnLeave = (record: BackendCurrentlyOnLeave): CurrentlyOnLeave => ({
+  agentId: record.agent_id,
+  agentName: record.agent_name,
+  startDate: record.start_date,
+  endDate: record.end_date,
+  openTicketCount: record.open_ticket_count,
+  status: record.status,
 });
 
 export const listTickets = async (query: TicketQuery = {}) => {
@@ -753,7 +803,7 @@ export const updateTicket = async (id: string, updates: Partial<Ticket>, reason?
   return mapTicket((await response.json()) as BackendTicket);
 };
 
-export const reassignTicket = async (id: string, assignedTo?: string, reason?: string): Promise<Ticket> => {
+export const assignTicket = async (id: string, assignedTo?: string, reason?: string): Promise<Ticket> => {
   const response = await apiFetch(`${API_BASE_URL}/tickets/${id}/assign`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -888,72 +938,35 @@ export const uploadKnowledgeDocument = async (
   if (category) formData.append('category', category);
   if (tags?.length) formData.append('tags', tags.join(','));
 
-  const requestUrl = `${API_BASE_URL}/knowledge/upload`;
-  const requestPayload = {
-    file: {
-      name: file.name,
-      type: file.type,
-      size: file.size,
-    },
-    title: title || null,
-    category: category || null,
-    tags: tags || [],
-  };
-
-  console.log('[KnowledgeBase Upload] Request', {
-    url: requestUrl,
+  const response = await apiFetch(`${API_BASE_URL}/knowledge/upload`, {
     method: 'POST',
-    headers: getAccessToken() ? { Authorization: 'Bearer <present>' } : {},
-    payload: requestPayload,
-    hasAuthorization: Boolean(getAccessToken()),
-    contentType: 'browser-managed multipart/form-data',
+    body: formData,
   });
 
-  try {
-    // Do not set Content-Type manually: fetch adds multipart boundaries for FormData.
-    const response = await apiFetch(requestUrl, {
-      method: 'POST',
-      body: formData,
-    });
-
-    console.log('[KnowledgeBase Upload] Response', {
-      url: requestUrl,
-      status: response.status,
-      ok: response.ok,
-      response,
-    });
-
-    if (!response.ok) {
-      let errorMessage = 'Upload failed';
-      try {
-        const errorData = await response.json();
-        if (errorData.detail) {
-          if (Array.isArray(errorData.detail)) {
-            // FastAPI validation error array
-            errorMessage = errorData.detail.map((err: any) => err.msg || String(err)).join(', ');
-          } else if (typeof errorData.detail === 'string') {
-            // Simple string detail
-            errorMessage = errorData.detail;
-          } else if (errorData.message) {
-            errorMessage = errorData.message;
-          }
+  if (!response.ok) {
+    let errorMessage = 'Upload failed';
+    try {
+      const errorData = await response.json();
+      if (errorData.detail) {
+        if (Array.isArray(errorData.detail)) {
+          // FastAPI validation error array
+          errorMessage = errorData.detail.map((err: any) => err.msg || String(err)).join(', ');
+        } else if (typeof errorData.detail === 'string') {
+          // Simple string detail
+          errorMessage = errorData.detail;
+        } else if (errorData.message) {
+          // Message field
+          errorMessage = errorData.message;
         }
-      } catch {
-        // Fallback if json parsing fails
-        errorMessage = 'Upload failed';
       }
-      throw new Error(errorMessage);
+    } catch {
+      // Fallback if json parsing fails
+      errorMessage = 'Upload failed';
     }
-
-    return await response.json();
-  } catch (error) {
-    console.error('[KnowledgeBase Upload] Error', {
-      url: requestUrl,
-      payload: requestPayload,
-      error,
-    });
-    throw error;
+    throw new Error(errorMessage);
   }
+
+  return await response.json();
 };
 
 export const deleteKnowledgeDocument = async (documentId: number): Promise<void> => {
@@ -1025,6 +1038,98 @@ export const getAdminAICopilotTimeline = async (range: TimelineRange): Promise<A
     throw new Error(`Unable to fetch AI copilot timeline: ${response.status}`);
   }
   return await response.json();
+};
+
+export const createLeaveRequest = async (startDate: string, endDate: string, reason: string): Promise<LeaveRequest> => {
+  const response = await apiFetch(`${API_BASE_URL}/leaves`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      start_date: startDate,
+      end_date: endDate,
+      reason,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorMessage = await extractErrorFromResponse(response);
+    throw new Error(errorMessage);
+  }
+
+  return mapLeaveRequest((await response.json()) as BackendLeaveRequest);
+};
+
+export const listLeaveRequests = async (query: LeaveRequestQuery = {}): Promise<LeaveRequest[]> => {
+  const params = new URLSearchParams();
+  if (query.status) params.set('status', query.status);
+  if (query.agentId) params.set('agent_id', query.agentId);
+
+  const response = await apiFetch(`${API_BASE_URL}/leaves${params.toString() ? `?${params.toString()}` : ''}`);
+  if (!response.ok) {
+    throw new Error(`Unable to fetch leave requests: ${response.status}`);
+  }
+
+  const data = (await response.json()) as BackendLeaveRequest[];
+  return data.map(mapLeaveRequest);
+};
+
+export const approveLeaveRequest = async (leaveRequestId: string): Promise<LeaveRequest> => {
+  const response = await apiFetch(`${API_BASE_URL}/leaves/${leaveRequestId}/approve`, {
+    method: 'PATCH',
+  });
+
+  if (!response.ok) {
+    const errorMessage = await extractErrorFromResponse(response);
+    throw new Error(errorMessage);
+  }
+
+  return mapLeaveRequest((await response.json()) as BackendLeaveRequest);
+};
+
+export const rejectLeaveRequest = async (leaveRequestId: string, rejectionReason: string): Promise<LeaveRequest> => {
+  const response = await apiFetch(`${API_BASE_URL}/leaves/${leaveRequestId}/reject`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rejection_reason: rejectionReason }),
+  });
+
+  if (!response.ok) {
+    const errorMessage = await extractErrorFromResponse(response);
+    throw new Error(errorMessage);
+  }
+
+  return mapLeaveRequest((await response.json()) as BackendLeaveRequest);
+};
+
+export const deleteLeaveRequest = async (leaveRequestId: string): Promise<void> => {
+  const response = await apiFetch(`${API_BASE_URL}/leaves/${leaveRequestId}`, {
+    method: 'DELETE',
+  });
+
+  if (!response.ok) {
+    const errorMessage = await extractErrorFromResponse(response);
+    throw new Error(errorMessage);
+  }
+};
+
+export const getAgentsAvailability = async (): Promise<AgentAvailability[]> => {
+  const response = await apiFetch(`${API_BASE_URL}/agents/availability`);
+  if (!response.ok) {
+    throw new Error(`Unable to fetch agents availability: ${response.status}`);
+  }
+
+  const data = (await response.json()) as BackendAgentAvailability[];
+  return data.map(mapAgentAvailability);
+};
+
+export const getCurrentlyOnLeave = async (): Promise<CurrentlyOnLeave[]> => {
+  const response = await apiFetch(`${API_BASE_URL}/leaves/currently-on-leave`);
+  if (!response.ok) {
+    throw new Error(`Unable to fetch currently on leave agents: ${response.status}`);
+  }
+
+  const data = (await response.json()) as BackendCurrentlyOnLeave[];
+  return data.map(mapCurrentlyOnLeave);
 };
 
 export const getAdminAnalytics = async (month: number, year: number): Promise<AdminAnalytics> => {

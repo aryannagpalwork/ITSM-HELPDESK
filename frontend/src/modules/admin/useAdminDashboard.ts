@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '../../shared/AppContext';
+import { getAdminTicketTimeline, getAdminAICopilotTimeline, getAgentsAvailability } from '../../shared/api';
 import { getAdminAnalytics } from '../../shared/api';
 import {
+  AgentAvailability,
   Ticket,
   AdminAnalytics,
 } from '../../shared/types';
@@ -99,16 +101,12 @@ export function useAdminDashboard(enabled: boolean) {
   const [year, setYear] = useState(now.getFullYear());
   const [activeFilter, setActiveFilter] = useState<AdminCardFilter | null>(null);
 
+  const [ticketTimeline, setTicketTimeline] = useState<TicketLifecycleTimeline | null>(null);
+  const [aiTimeline, setAiTimeline] = useState<AICopilotTimeline | null>(null);
+  const [agentsAvailability, setAgentsAvailability] = useState<AgentAvailability[]>([]);
   const [analytics, setAnalytics] = useState<AdminAnalytics | null>(null);
   const [timelinesLoading, setTimelinesLoading] = useState(false);
   const [timelinesError, setTimelinesError] = useState<string | null>(null);
-
-  // Refresh organization KPIs when ticket data changes so the FCR and CSAT
-  // cards reflect updates immediately instead of waiting for polling.
-  const ticketRefreshKey = useMemo(
-    () => tickets.map(ticket => `${ticket.id}:${ticket.status}:${ticket.updatedAt}`).join('|'),
-    [tickets],
-  );
 
   const fetchAnalytics = useCallback(async (selectedMonth: number, selectedYear: number) => {
     try {
@@ -124,6 +122,16 @@ export function useAdminDashboard(enabled: boolean) {
     }
   }, []);
 
+  const fetchAvailability = useCallback(async () => {
+    try {
+      const availability = await getAgentsAvailability();
+      setAgentsAvailability(availability);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Unable to load agents availability';
+      console.warn(msg, error);
+    }
+  }, []);
+
   // Fetch all period-sensitive dashboard analytics with one request.
   useEffect(() => {
     if (enabled) {
@@ -131,16 +139,25 @@ export function useAdminDashboard(enabled: boolean) {
     }
   }, [enabled, month, year, fetchAnalytics]);
 
-  // Load KPIs on mount and whenever the local ticket snapshot changes.
+  useEffect(() => {
+    if (enabled) {
+      fetchAvailability();
+    }
+  }, [enabled, fetchAvailability]);
+
+  // Load KPIs on mount when enabled.
   useEffect(() => {
     if (enabled) {
       loadAdminKPIs();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, ticketRefreshKey]);
+  }, [enabled]);
 
   const refreshAll = useCallback(() => {
     loadAdminKPIs();
+    fetchTimelines(range);
+    fetchAvailability();
+  }, [loadAdminKPIs, fetchTimelines, fetchAvailability, range]);
     fetchAnalytics(month, year);
   }, [loadAdminKPIs, fetchAnalytics, month, year]);
 
@@ -150,8 +167,11 @@ export function useAdminDashboard(enabled: boolean) {
   useEffect(() => {
     savedRefresh.current = () => {
       loadAdminKPIs();
+      fetchTimelines(range);
+      fetchAvailability();
       fetchAnalytics(month, year);
     };
+  }, [loadAdminKPIs, fetchTimelines, fetchAvailability, range]);
   }, [loadAdminKPIs, fetchAnalytics, month, year]);
 
   useEffect(() => {
@@ -243,6 +263,11 @@ export function useAdminDashboard(enabled: boolean) {
       }));
   }, [tickets]);
 
+  const agentsOnLeaveToday = useMemo(
+    () => agentsAvailability.filter(agent => agent.onLeaveToday).length,
+    [agentsAvailability],
+  );
+
   return {
     month,
     year,
@@ -262,6 +287,8 @@ export function useAdminDashboard(enabled: boolean) {
     filteredTicketCount: filteredTickets.length,
     incidentQueue,
     recentActivity,
+    agentsAvailability,
+    agentsOnLeaveToday,
     adminKPIs,
     kpisLoading,
     kpisError,
