@@ -61,10 +61,18 @@ class TicketCreate(BaseModel):
     ai_analysis_priority: str | None = None
     ai_analysis_department: str | None = None
     ai_analysis_tags: list[str] = Field(default_factory=list)
-    ai_analysis_confidence: int | None = None
+    ai_analysis_confidence: float | None = None
     ai_analysis_possible_root_cause: str | None = None
     ai_analysis_suggested_resolution: str | None = None
     ai_analysis_estimated_sla: str | None = None
+    sla_target_hours: float | None = None
+    sla_started_at: datetime | None = None
+    sla_due_at: datetime | None = None
+    sla_remaining_hours: float | None = None
+    sla_status: str | None = None
+    sla_breached: bool | None = None
+    resolution_duration_hours: float | None = None
+    sla_compliant: bool | None = None
 
     @field_validator("priority", mode="before")
     @classmethod
@@ -96,7 +104,7 @@ class TicketUpdate(BaseModel):
     ai_analysis_priority: str | None = None
     ai_analysis_department: str | None = None
     ai_analysis_tags: list[str] | None = None
-    ai_analysis_confidence: int | None = None
+    ai_analysis_confidence: float | None = None
     ai_analysis_possible_root_cause: str | None = None
     ai_analysis_suggested_resolution: str | None = None
     ai_analysis_estimated_sla: str | None = None
@@ -143,10 +151,18 @@ class TicketRead(ORMBase):
     ai_analysis_priority: str | None = None
     ai_analysis_department: str | None = None
     ai_analysis_tags: list[str] = Field(default_factory=list)
-    ai_analysis_confidence: int | None = None
+    ai_analysis_confidence: float | None = None
     ai_analysis_possible_root_cause: str | None = None
     ai_analysis_suggested_resolution: str | None = None
     ai_analysis_estimated_sla: str | None = None
+    sla_target_hours: float | None = None
+    sla_started_at: datetime | None = None
+    sla_due_at: datetime | None = None
+    sla_remaining_hours: float | None = None
+    sla_status: str | None = None
+    sla_breached: bool | None = None
+    resolution_duration_hours: float | None = None
+    sla_compliant: bool | None = None
 
 
 class TicketAnalyzeRequest(BaseModel):
@@ -161,7 +177,7 @@ class TicketAnalyzeResponse(BaseModel):
     department: str
     tags: list[str]
     possible_root_cause: str
-    confidence: int
+    confidence: float
     suggested_resolution: str
     knowledge_articles: list[str]
     estimated_sla: str

@@ -10,6 +10,7 @@ interface ChartPanelProps {
   emptyMessage?: string;
   actions?: React.ReactNode;
   className?: string;
+  contentClassName?: string;
   children: React.ReactNode;
 }
 
@@ -26,6 +27,7 @@ const ChartPanelBase: React.FC<ChartPanelProps> = ({
   emptyMessage = 'No data available for the selected range.',
   actions,
   className = '',
+  contentClassName = 'h-64 mt-4',
   children,
 }) => {
   return (
@@ -38,7 +40,7 @@ const ChartPanelBase: React.FC<ChartPanelProps> = ({
         {actions && <div className="shrink-0">{actions}</div>}
       </div>
 
-      <div className="h-64 mt-4">
+      <div className={contentClassName}>
         {error ? (
           <div className="h-full flex flex-col items-center justify-center gap-2 text-[10px] text-rose-400">
             <AlertTriangle className="w-5 h-5" />

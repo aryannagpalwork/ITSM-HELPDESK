@@ -1,10 +1,9 @@
 import React, { lazy, Suspense, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../shared/AppContext';
-import { useAdminDashboard, AdminCardFilter } from './useAdminDashboard';
+import { useAdminDashboard } from './useAdminDashboard';
 import { KpiCard } from './components/KpiCard';
 import { ChartPanel } from './components/ChartPanel';
-import { RangeToggle } from './components/RangeToggle';
 import {
   Activity,
   AlertOctagon,
@@ -20,25 +19,19 @@ import {
   AlertTriangle,
   Loader2,
   X,
+  Ticket,
+  Bot,
+  UserCheck,
 } from 'lucide-react';
 
-const TicketTrendChart = lazy(() => import('./components/charts/TicketTrendChart'));
-const SeverityDistributionChart = lazy(() => import('./components/charts/SeverityDistributionChart'));
+const TicketLifecycleDetailChart = lazy(() => import('./components/charts/TicketLifecycleDetailChart'));
+const SLAComplianceChart = lazy(() => import('./components/charts/SLAComplianceChart'));
 
 const ChartFallback: React.FC = () => (
   <div className="h-full flex items-center justify-center text-tertiary">
     <Loader2 className="w-5 h-5 animate-spin text-accent" />
   </div>
 );
-
-// Semantic severity colors for the always-visible summary tiles (kept local so
-// the lazy chart chunk is not pulled into the main bundle).
-const SEVERITY_TILE_COLOR: Record<string, string> = {
-  low: '#3b82f6',
-  medium: '#10b981',
-  high: '#f59e0b',
-  critical: '#f43f5e',
-};
 
 const PRIORITY_BADGE: Record<string, string> = {
   critical: 'bg-rose-500/10 border-rose-500/30 text-rose-400',
@@ -60,16 +53,16 @@ export const AdminDashboard: React.FC = () => {
   const isAuthorized = isAdmin || currentUser.role === 'Agent';
 
   const {
-    range,
-    setRange,
+    month,
+    year,
+    setMonth,
+    setYear,
     activeFilter,
-    toggleFilter,
     clearFilter,
     ticketTimeline,
+    analytics,
     timelinesLoading,
     timelinesError,
-    priorityData,
-    filteredTicketCount,
     incidentQueue,
     recentActivity,
     adminKPIs,
@@ -79,10 +72,7 @@ export const AdminDashboard: React.FC = () => {
   } = useAdminDashboard(isAdmin);
 
   const goToTickets = useCallback((qs: string) => navigate(`/admin/tickets${qs}`), [navigate]);
-  const goToPriority = useCallback((key?: string) => {
-    if (key) navigate(`/admin/tickets?priority=${key}`);
-  }, [navigate]);
-  const onFilter = useCallback((filter: AdminCardFilter) => toggleFilter(filter), [toggleFilter]);
+  const goToSlaTickets = useCallback((filter: string) => goToTickets(`?sla=${filter}`), [goToTickets]);
   const filterActive = (label: string) => activeFilter?.label === label;
 
   if (!isAuthorized) {
@@ -109,7 +99,16 @@ export const AdminDashboard: React.FC = () => {
   const kpiLoading = isAdmin && kpisLoading && !adminKPIs;
 
   const trendEmpty = !ticketTimeline || (ticketTimeline.created.every(p => p.value === 0) && ticketTimeline.resolved.every(p => p.value === 0));
-  const severityEmpty = filteredTicketCount === 0;
+  const totalFor = (key: string) => analytics?.totals[key] ?? 0;
+  const resolvedTotal = totalFor('resolved') + totalFor('closed');
+  const hasResolvedTickets = resolvedTotal > 0;
+  const selectedMonthLabel = new Date(year, month - 1, 1).toLocaleString('en-US', { month: 'long' });
+  const slaItems = analytics?.slaByPriority || [];
+  const slaWithin = slaItems.reduce((sum, item) => sum + item.withinSla, 0);
+  const slaBreached = slaItems.reduce((sum, item) => sum + item.breached, 0);
+  const slaActive = slaItems.reduce((sum, item) => sum + item.active, 0);
+  const slaResolved = slaWithin + slaBreached;
+  const slaCompliance = slaResolved ? Math.round((slaWithin / slaResolved) * 100) : 0;
 
   return (
     <div id="admin-command-center" className="flex-1 bg-app p-8 overflow-y-auto h-full font-sans">
@@ -170,7 +169,7 @@ export const AdminDashboard: React.FC = () => {
             sublabel={richKpisAvailable ? 'Org-wide average resolution time' : 'Calculating…'}
             loading={kpiLoading}
             isActive={filterActive('Mean Time To Resolve')}
-            onClick={() => onFilter({ label: 'Mean Time To Resolve', status: 'resolved' })}
+            onClick={() => goToTickets('?status=resolved')}
             onOpen={() => goToTickets('?status=resolved')}
           />
           <KpiCard
@@ -181,7 +180,7 @@ export const AdminDashboard: React.FC = () => {
             sublabel={richKpisAvailable ? 'Resolved on first contact' : 'Pending data'}
             loading={kpiLoading}
             isActive={filterActive('First Contact Resolution')}
-            onClick={() => onFilter({ label: 'First Contact Resolution', status: 'resolved' })}
+            onClick={() => goToTickets('?status=resolved')}
             onOpen={() => goToTickets('?status=resolved')}
           />
           <KpiCard
@@ -192,14 +191,14 @@ export const AdminDashboard: React.FC = () => {
             sublabel={richKpisAvailable ? 'Derived satisfaction index' : 'Pending data'}
             loading={kpiLoading}
             isActive={filterActive('User Satisfaction (CSAT)')}
-            onClick={() => onFilter({ label: 'User Satisfaction (CSAT)', status: 'resolved' })}
+            onClick={() => goToTickets('?status=resolved')}
             onOpen={() => goToTickets('?status=resolved')}
           />
         </div>
       </div>
 
       {/* Analytics & Trends */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-4">
         <div className="flex items-center space-x-2">
           <TrendingUp className="w-3.5 h-3.5 text-accent" />
           <span className="text-[10px] font-mono uppercase tracking-wider text-secondary font-semibold">Analytics &amp; Trends</span>
@@ -217,59 +216,139 @@ export const AdminDashboard: React.FC = () => {
               </button>
             </div>
           )}
-          <RangeToggle value={range} onChange={setRange} />
+          <label className="flex items-center gap-2 text-[9px] font-mono uppercase text-tertiary">
+            Month
+            <select
+              value={month}
+              onChange={(event) => setMonth(Number(event.target.value))}
+              className="bg-input border border-token rounded-lg px-2 py-1.5 text-[10px] text-secondary outline-none"
+              aria-label="Analytics month"
+            >
+              {Array.from({ length: 12 }, (_, index) => index + 1).map(value => (
+                <option key={value} value={value}>{new Date(2000, value - 1, 1).toLocaleString('en-US', { month: 'short' })}</option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-[9px] font-mono uppercase text-tertiary">
+            Year
+            <select
+              value={year}
+              onChange={(event) => setYear(Number(event.target.value))}
+              className="bg-input border border-token rounded-lg px-2 py-1.5 text-[10px] text-secondary outline-none"
+              aria-label="Analytics year"
+            >
+              {Array.from({ length: 5 }, (_, index) => new Date().getFullYear() - 2 + index).map(value => (
+                <option key={value} value={value}>{value}</option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={refresh}
+            disabled={timelinesLoading}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-token bg-card-solid px-2.5 py-1.5 text-[10px] font-medium text-secondary transition-all hover-elev hover-text disabled:opacity-50"
+            aria-label="Refresh analytics"
+          >
+            <RefreshCcw className={`h-3.5 w-3.5 ${timelinesLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+      <div className="grid grid-cols-1 lg:grid-cols-2 items-stretch gap-4 mb-8">
         <ChartPanel
-          className="lg:col-span-2"
+          className="h-full rounded-2xl p-4 shadow-lg transition-shadow hover:shadow-xl flex flex-col"
           title="Ticket Volume Lifecycle"
-          description="Created vs resolved incidents across the selected range"
+          description={`Created, resolved, and in-progress tickets during ${selectedMonthLabel} ${year}`}
           loading={timelinesLoading && !ticketTimeline}
           error={timelinesError}
           empty={!timelinesLoading && trendEmpty}
+          contentClassName="mt-4 flex-1 min-h-0 flex flex-col"
         >
-          <Suspense fallback={<ChartFallback />}>
-            <TicketTrendChart data={ticketTimeline} />
-          </Suspense>
-        </ChartPanel>
-
-        <div className="bg-card border border-token p-5 rounded-2xl">
-          <h3 className="text-xs font-semibold text-primary">Incident Severity Distribution</h3>
-          <p className="text-[10px] text-tertiary mt-0.5">
-            {activeFilter ? `Filtered: ${activeFilter.label}` : 'Distribution of tickets across standard priorities'}
-          </p>
-          <div className="h-40 mt-4">
-            {severityEmpty ? (
-              <div className="h-full flex flex-col items-center justify-center gap-2 text-[10px] text-tertiary">
-                <Inbox className="w-5 h-5" />
-                <span className="text-center max-w-xs">No tickets match the current filter and range.</span>
-              </div>
-            ) : (
-              <Suspense fallback={<ChartFallback />}>
-                <SeverityDistributionChart
-                  data={priorityData}
-                  activeKey={activeFilter?.priority}
-                  onSelect={goToPriority}
-                />
-              </Suspense>
-            )}
-          </div>
-          <div className="grid grid-cols-4 gap-2 mt-3">
-            {priorityData.map(p => (
+          <div className="grid grid-cols-2 gap-2.5 mb-4">
+            {[
+              { label: 'Created Tickets', key: 'totalCreated', icon: <Ticket className="w-4 h-4" />, color: 'text-sky-400', border: 'border-sky-400/25' },
+              { label: 'Resolved by AI Copilot', key: 'aiResolved', icon: <Bot className="w-4 h-4" />, color: 'text-violet-400', border: 'border-violet-400/25' },
+              { label: 'Resolved by IT Agents', key: 'agentResolved', icon: <UserCheck className="w-4 h-4" />, color: 'text-cyan-400', border: 'border-cyan-400/25' },
+              { label: 'Currently In Progress', key: 'inProgress', icon: <Activity className="w-4 h-4" />, color: 'text-amber-400', border: 'border-amber-400/25' },
+            ].map(metric => (
               <button
-                key={p.key}
-                onClick={() => goToPriority(p.key)}
-                className="p-2 bg-card-solid border border-token rounded-lg text-center hover-elev hover-border transition-all"
-                title={`View ${p.name.toLowerCase()} priority tickets`}
+                key={metric.key}
+                type="button"
+                onClick={() => goToTickets(
+                  metric.key === 'inProgress'
+                    ? '?status=in_progress'
+                    : metric.key === 'totalCreated' ? '' : '?status=resolved'
+                )}
+                className={`text-left bg-card-solid border ${metric.border} rounded-2xl p-3 transition-transform hover:-translate-y-0.5 hover:shadow-lg cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-accent/50`}
+                title={`Open ${metric.label.toLowerCase()}`}
               >
-                <div className="text-sm font-bold" style={{ color: SEVERITY_TILE_COLOR[p.key] }}>{p.value}</div>
-                <div className="text-[8px] font-mono uppercase text-tertiary mt-0.5">{p.name}</div>
+                <div className={`flex items-center gap-2 ${metric.color}`}>
+                  {metric.icon}
+                  <span className="text-[9px] font-mono uppercase tracking-wide text-tertiary">{metric.label}</span>
+                </div>
+                <div className={`text-[28px] leading-none font-bold mt-2 ${metric.color}`}>
+                  {timelinesLoading && !analytics ? '—' : totalFor(metric.key)}
+                </div>
               </button>
             ))}
           </div>
-        </div>
+          <div className="flex-1 min-h-0">
+            <Suspense fallback={<ChartFallback />}>
+              <TicketLifecycleDetailChart data={ticketTimeline} />
+            </Suspense>
+          </div>
+        </ChartPanel>
+
+        <ChartPanel
+          className="rounded-2xl p-4 shadow-lg transition-shadow hover:shadow-xl"
+          title="SLA Compliance"
+          description="Resolved tickets compared with configured service targets"
+          loading={timelinesLoading && !analytics}
+          error={timelinesError}
+          empty={!timelinesLoading && !hasResolvedTickets}
+          emptyMessage="No resolved tickets found for the selected period."
+          contentClassName="mt-4"
+        >
+          <div className="grid grid-cols-2 gap-2.5 mb-5">
+            {[
+              { label: 'Overall Compliance', value: `${slaCompliance}%`, color: 'text-emerald-400', filter: 'resolved' },
+              { label: 'Within SLA', value: slaWithin, color: 'text-emerald-400', filter: 'within' },
+              { label: 'SLA Breached', value: slaBreached, color: 'text-rose-400', filter: 'breached' },
+              { label: 'Active SLA Tickets', value: slaActive, color: 'text-amber-400', filter: 'active' },
+            ].map(metric => (
+              <button
+                key={metric.label}
+                type="button"
+                onClick={() => goToSlaTickets(metric.filter)}
+                className="text-left bg-card-solid border border-token rounded-2xl p-3 transition-transform hover:-translate-y-0.5 hover:shadow-lg cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-accent/50"
+                title={`Open ${metric.label.toLowerCase()}`}
+              >
+                <span className="block text-[9px] font-mono uppercase tracking-wide text-tertiary">{metric.label}</span>
+                <span className={`block text-xl font-bold mt-1 ${metric.color}`}>{metric.value}</span>
+              </button>
+            ))}
+          </div>
+          <div className="grid grid-cols-2 gap-2 mb-4" aria-label="SLA target reference">
+            {[
+              { priority: 'Critical', first: '15m', resolution: '4h', color: 'text-rose-400' },
+              { priority: 'High', first: '30m', resolution: '8h', color: 'text-amber-400' },
+              { priority: 'Medium', first: '2h', resolution: '24h', color: 'text-sky-400' },
+              { priority: 'Low', first: '4h', resolution: '72h', color: 'text-emerald-400' },
+            ].map(target => (
+              <div key={target.priority} className="rounded-xl border border-token bg-card-solid px-3 py-2.5">
+                <span className={`block text-[10px] font-semibold ${target.color}`}>{target.priority}</span>
+                <span className="mt-1 block text-[9px] text-tertiary">First response <strong className="text-secondary">{target.first}</strong></span>
+                <span className="block text-[9px] text-tertiary">Resolution <strong className="text-secondary">{target.resolution}</strong></span>
+              </div>
+            ))}
+          </div>
+          <div className="h-[470px]">
+            <Suspense fallback={<ChartFallback />}>
+              <SLAComplianceChart data={slaItems} />
+            </Suspense>
+          </div>
+        </ChartPanel>
       </div>
 
       {/* Incident Service Queue (replaces pending user requests) */}

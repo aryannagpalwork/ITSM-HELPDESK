@@ -16,6 +16,7 @@ from app.schemas.ticket import (
     TicketUpdate,
 )
 from app.schemas.audit_log import AuditLogRead
+from app.services.sla import calculate_sla, snapshot_for_ticket
 
 ACTIVE_TICKET_STATUSES = {"Open", "In Progress"}
 DEFAULT_AGENT_CAPACITY = 10
@@ -328,6 +329,13 @@ async def _serialize_ticket(ticket: dict, db: AsyncIOMotorDatabase) -> TicketRea
         for c in comment_docs:
             comments.append(await _serialize_comment(c, db))
     
+    # Older tickets may not have an ``updated_at`` field.  Treat their
+    # creation time as the last update time so one malformed/legacy document
+    # cannot make the entire ticket list fail with a 500.
+    created_at = ticket.get("created_at") or datetime.utcnow()
+    updated_at = ticket.get("updated_at") or created_at
+
+    sla = snapshot_for_ticket(ticket)
     return TicketRead(
         id=ticket["_id"],
         ticket_number=ticket["ticket_number"],
@@ -347,8 +355,8 @@ async def _serialize_ticket(ticket: dict, db: AsyncIOMotorDatabase) -> TicketRea
         created_by_name=creator.get("full_name") if creator else None,
         ai_summary=ticket.get("ai_summary"),
         resolution=ticket.get("resolution"),
-        created_at=ticket["created_at"],
-        updated_at=ticket["updated_at"],
+        created_at=created_at,
+        updated_at=updated_at,
         comments=comments,
         # AI Analysis fields
         ai_analysis_category=ticket.get("ai_analysis_category"),
@@ -359,6 +367,7 @@ async def _serialize_ticket(ticket: dict, db: AsyncIOMotorDatabase) -> TicketRea
         ai_analysis_possible_root_cause=ticket.get("ai_analysis_possible_root_cause"),
         ai_analysis_suggested_resolution=ticket.get("ai_analysis_suggested_resolution"),
         ai_analysis_estimated_sla=ticket.get("ai_analysis_estimated_sla"),
+        **sla,
     )
 
 
@@ -401,6 +410,12 @@ async def create_ticket(db: AsyncIOMotorDatabase, payload: TicketCreate, reason:
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
     }
+    ticket.update(calculate_sla(
+        priority=ticket["priority"],
+        started_at=ticket["created_at"],
+        status=ticket["status"],
+        now=ticket["created_at"],
+    ))
     reserved_automatically = False
     # Creation is always automatic. The legacy assigned_to input is accepted
     # for API compatibility but intentionally cannot bypass routing.
@@ -632,6 +647,17 @@ async def update_ticket(db: AsyncIOMotorDatabase, ticket_id: str, payload: Ticke
             })
             update_data[field] = new_value
 
+    if "priority" in update_data or "status" in update_data:
+        next_ticket = {**ticket, **update_data}
+        next_status = next_ticket.get("status")
+        if next_status in {"Resolved", "Closed"}:
+            next_ticket["resolved_at"] = ticket.get("resolved_at") or update_data["updated_at"]
+            update_data.setdefault("resolved_at", next_ticket["resolved_at"])
+        elif next_status in ACTIVE_TICKET_STATUSES:
+            next_ticket["resolved_at"] = None
+            update_data["resolved_at"] = None
+        update_data.update(snapshot_for_ticket(next_ticket, update_data["updated_at"]))
+
     assignment_changed = "assigned_to" in update_data and update_data["assigned_to"] != ticket.get("assigned_to")
     if assignment_changed:
         # Route assignment changes through the same workload-safe path used by
@@ -733,7 +759,11 @@ async def escalate_ticket(db: AsyncIOMotorDatabase, ticket_id: str, new_priority
     old_priority = ticket["priority"]
     await db.tickets.update_one(
         {"_id": ticket_id},
-        {"$set": {"priority": new_priority, "updated_at": datetime.utcnow()}}
+        {"$set": {
+            "priority": new_priority,
+            "updated_at": datetime.utcnow(),
+            **snapshot_for_ticket({**ticket, "priority": new_priority}, datetime.utcnow()),
+        }}
     )
     await _write_audit(
         db,
@@ -754,9 +784,11 @@ async def resolve_ticket(db: AsyncIOMotorDatabase, ticket_id: str, resolution: s
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found.")
     old_status = ticket["status"]
     old_resolution = ticket.get("resolution")
-    update_data = {"status": "Resolved", "updated_at": datetime.utcnow()}
+    resolved_at = datetime.utcnow()
+    update_data = {"status": "Resolved", "resolved_at": resolved_at, "updated_at": resolved_at}
     if resolution:
         update_data["resolution"] = resolution
+    update_data.update(snapshot_for_ticket({**ticket, **update_data}, resolved_at))
     await db.tickets.update_one({"_id": ticket_id}, {"$set": update_data})
     if old_status in ACTIVE_TICKET_STATUSES and ticket.get("assigned_to"):
         await _adjust_agent_workload(db, ticket["assigned_to"], active_delta=-1, resolved_delta=1)
@@ -788,10 +820,11 @@ async def close_ticket(db: AsyncIOMotorDatabase, ticket_id: str, current_user_id
     if ticket is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found.")
     old_status = ticket["status"]
-    await db.tickets.update_one(
-        {"_id": ticket_id},
-        {"$set": {"status": "Closed", "updated_at": datetime.utcnow()}}
-    )
+    closed_at = datetime.utcnow()
+    close_update = {"status": "Closed", "updated_at": closed_at,
+                    "resolved_at": ticket.get("resolved_at") or closed_at}
+    close_update.update(snapshot_for_ticket({**ticket, **close_update}, closed_at))
+    await db.tickets.update_one({"_id": ticket_id}, {"$set": close_update})
     if old_status in ACTIVE_TICKET_STATUSES and ticket.get("assigned_to"):
         await _adjust_agent_workload(db, ticket["assigned_to"], active_delta=-1, resolved_delta=1)
     await _write_audit(
@@ -812,10 +845,10 @@ async def reopen_ticket(db: AsyncIOMotorDatabase, ticket_id: str, current_user_i
     if ticket is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found.")
     old_status = ticket["status"]
-    await db.tickets.update_one(
-        {"_id": ticket_id},
-        {"$set": {"status": "In Progress", "updated_at": datetime.utcnow()}}
-    )
+    reopened_at = datetime.utcnow()
+    reopen_update = {"status": "In Progress", "updated_at": reopened_at, "resolved_at": None}
+    reopen_update.update(snapshot_for_ticket({**ticket, **reopen_update}, reopened_at))
+    await db.tickets.update_one({"_id": ticket_id}, {"$set": reopen_update})
     if old_status not in ACTIVE_TICKET_STATUSES and ticket.get("assigned_to"):
         await _adjust_agent_workload(db, ticket["assigned_to"], active_delta=1)
     await _write_audit(

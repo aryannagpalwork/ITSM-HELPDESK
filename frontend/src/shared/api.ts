@@ -1,4 +1,4 @@
-import { Ticket, TicketComment, TicketPriority, TicketStatus, ChatRequest, ChatResponse, User, EmployeeKPIs, AgentKPIs, AdminKPIs, TimelineRange, TicketLifecycleTimeline, AICopilotTimeline } from './types';
+import { Ticket, TicketComment, TicketPriority, TicketStatus, ChatRequest, ChatResponse, User, EmployeeKPIs, AgentKPIs, AdminKPIs, AdminAnalytics, TimelineRange, TicketLifecycleTimeline, AICopilotTimeline } from './types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 const ACCESS_TOKEN_KEY = 'it_copilot_access_token';
@@ -58,13 +58,21 @@ const refreshAccessToken = async (): Promise<string> => {
 };
 
 const apiFetch = async (input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> => {
-  let response = await fetch(input, {
-    ...init,
-    headers: {
-      ...authHeaders(),
-      ...(init.headers || {}),
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(input, {
+      ...init,
+      headers: {
+        ...authHeaders(),
+        ...(init.headers || {}),
+      },
+    });
+  } catch (error) {
+    const detail = error instanceof TypeError
+      ? 'Unable to reach the API. Check that the backend is running and that its CORS origins include this frontend URL.'
+      : 'Network request failed.';
+    throw new Error(detail, { cause: error });
+  }
 
   if (response.status === 401) {
     if (isRefreshing) {
@@ -144,6 +152,14 @@ interface BackendTicket {
   ai_analysis_possible_root_cause?: string;
   ai_analysis_suggested_resolution?: string;
   ai_analysis_estimated_sla?: string;
+  sla_target_hours?: number;
+  sla_started_at?: string;
+  sla_due_at?: string;
+  sla_remaining_hours?: number;
+  sla_status?: 'Active' | 'Near Breach' | 'Within SLA' | 'Breached' | 'Completed';
+  sla_breached?: boolean;
+  resolution_duration_hours?: number;
+  sla_compliant?: boolean;
   created_at: string;
   updated_at: string;
   comments?: BackendTicketComment[];
@@ -609,7 +625,9 @@ export const mapTicket = (ticket: BackendTicket): Ticket => ({
   suggestedResolution: ticket.resolution || undefined,
   resolution: ticket.resolution || undefined,
   createdAt: ticket.created_at,
-  updatedAt: ticket.updated_at,
+  // Keep legacy tickets visible even when the backend document predates the
+  // updated_at field migration.
+  updatedAt: ticket.updated_at || ticket.created_at,
   userName: ticket.created_by_name || 'Unassigned requester',
   agentName: ticket.assigned_to_name || undefined,
   departmentName: ticket.category,
@@ -623,6 +641,14 @@ export const mapTicket = (ticket: BackendTicket): Ticket => ({
   aiAnalysisPossibleRootCause: ticket.ai_analysis_possible_root_cause,
   aiAnalysisSuggestedResolution: ticket.ai_analysis_suggested_resolution,
   aiAnalysisEstimatedSla: ticket.ai_analysis_estimated_sla,
+  slaTargetHours: ticket.sla_target_hours,
+  slaStartedAt: ticket.sla_started_at,
+  slaDueAt: ticket.sla_due_at,
+  slaRemainingHours: ticket.sla_remaining_hours,
+  slaStatus: ticket.sla_status,
+  slaBreached: ticket.sla_breached,
+  resolutionDurationHours: ticket.resolution_duration_hours,
+  slaCompliant: ticket.sla_compliant,
   
   // Assigned team
   assignedTeam: ticket.assigned_team,
@@ -997,6 +1023,14 @@ export const getAdminAICopilotTimeline = async (range: TimelineRange): Promise<A
   const response = await apiFetch(`${API_BASE_URL}/kpi/admin/timeline/ai?range=${range}`);
   if (!response.ok) {
     throw new Error(`Unable to fetch AI copilot timeline: ${response.status}`);
+  }
+  return await response.json();
+};
+
+export const getAdminAnalytics = async (month: number, year: number): Promise<AdminAnalytics> => {
+  const response = await apiFetch(`${API_BASE_URL}/kpi/admin/analytics?month=${month}&year=${year}`);
+  if (!response.ok) {
+    throw new Error(`Unable to fetch admin analytics: ${response.status}`);
   }
   return await response.json();
 };

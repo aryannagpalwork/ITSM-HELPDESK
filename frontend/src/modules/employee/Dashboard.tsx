@@ -187,12 +187,8 @@ export const EmployeeDashboard: React.FC = () => {
   };
 
   const handleKpiFilter = (status: string) => {
-    setSearch('');
-    setPriorityFilter('all');
-    setCategoryFilter('all');
-    setStatusFilter(status);
-    setChartFilter(status === 'resolved' ? 'resolved' : status === 'open' ? 'open' : 'all');
-    document.getElementById('employee-tickets')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const query = status === 'all' ? '' : `?status=${status}`;
+    navigate(`/tickets${query}`);
   };
 
   const getPriorityBadgeColor = (prio: TicketPriority) => {

@@ -15,12 +15,43 @@ class TimelineSeries(BaseModel):
 class TicketLifecycleTimeline(BaseModel):
     created: List[TimelinePoint] = Field(default_factory=list)
     resolved: List[TimelinePoint] = Field(default_factory=list)
+    aiResolved: List[TimelinePoint] = Field(default_factory=list)
+    agentResolved: List[TimelinePoint] = Field(default_factory=list)
+    inProgress: List[TimelinePoint] = Field(default_factory=list)
 
 
 class AICopilotTimeline(BaseModel):
     chats: List[TimelinePoint] = Field(default_factory=list)
     resolved: List[TimelinePoint] = Field(default_factory=list)
     escalated: List[TimelinePoint] = Field(default_factory=list)
+
+
+class AnalyticsMetric(BaseModel):
+    name: str
+    value: int = 0
+
+
+class SLAAnalytics(BaseModel):
+    priority: str
+    slaTargetHours: float | None = None
+    withinSla: int = 0
+    breached: int = 0
+    active: int = 0
+    nearBreach: int = 0
+    averageResolutionHours: float = 0.0
+    compliance: float = 0.0
+
+
+class AdminAnalytics(BaseModel):
+    month: int
+    year: int
+    days: List[str] = Field(default_factory=list)
+    ticketLifecycle: TicketLifecycleTimeline = Field(default_factory=TicketLifecycleTimeline)
+    aiCopilot: AICopilotTimeline = Field(default_factory=AICopilotTimeline)
+    resolution: List[AnalyticsMetric] = Field(default_factory=list)
+    sla: List[AnalyticsMetric] = Field(default_factory=list)
+    slaByPriority: List[SLAAnalytics] = Field(default_factory=list)
+    totals: dict[str, int] = Field(default_factory=dict)
 
 
 class AICopilotEmployeeKPIs(BaseModel):
@@ -88,6 +119,9 @@ class AdminKPIs(BaseModel):
     orgCsatScore: float = 0.0
     slaCompliance: float = 0.0
     slaBreaches: int = 0
+    activeSlaTickets: int = 0
+    nearBreachTickets: int = 0
+    criticalSlaBreaches: int = 0
     ticketBacklog: int = 0
     aiResolutionRate: float = 0.0
     aiQueries: int = 0

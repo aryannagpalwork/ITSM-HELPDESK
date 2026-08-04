@@ -1,13 +1,13 @@
 import React, { useMemo } from 'react';
 import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  Tooltip,
   CartesianGrid,
   Legend,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
 } from 'recharts';
 import { useTheme } from '../../../../shared/ThemeContext';
 import { TicketLifecycleTimeline } from '../../../../shared/types';
@@ -16,56 +16,79 @@ interface Props {
   data: TicketLifecycleTimeline | null;
 }
 
-interface MergedPoint {
+interface LifecyclePoint {
   label: string;
   created: number;
-  resolved: number;
+  inProgress: number;
+  aiResolved: number;
+  agentResolved: number;
 }
 
-/** Created vs resolved ticket volume (area fill) across the selected range. */
+const emptyPoint = (label: string): LifecyclePoint => ({
+  label,
+  created: 0,
+  inProgress: 0,
+  aiResolved: 0,
+  agentResolved: 0,
+});
+
 const TicketTrendChart: React.FC<Props> = ({ data }) => {
   const { chart } = useTheme();
-  const createdColor = chart.palette[0] || '#8b5cf6';
-  const resolvedColor = chart.palette[1] || '#10b981';
 
-  const merged = useMemo<MergedPoint[]>(() => {
+  const points = useMemo<LifecyclePoint[]>(() => {
     if (!data) return [];
-    const map = new Map<string, MergedPoint>();
-    data.created.forEach(p => map.set(p.label, { label: p.label, created: p.value, resolved: 0 }));
-    data.resolved.forEach(p => {
-      const existing = map.get(p.label) || { label: p.label, created: 0, resolved: 0 };
-      existing.resolved = p.value;
-      map.set(p.label, existing);
-    });
-    return Array.from(map.values());
+    const map = new Map<string, LifecyclePoint>();
+    const add = (source: TicketLifecycleTimeline['created'] | undefined, key: keyof Omit<LifecyclePoint, 'label'>) => {
+      (source || []).forEach(point => {
+        const current = map.get(point.label) || emptyPoint(point.label);
+        current[key] = Number(point.value) || 0;
+        map.set(point.label, current);
+      });
+    };
+
+    add(data.created, 'created');
+    add(data.inProgress, 'inProgress');
+    add(data.aiResolved, 'aiResolved');
+    add(data.agentResolved, 'agentResolved');
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
   }, [data]);
 
+  const formatDate = (label: string) => {
+    const date = new Date(`${label}T00:00:00`);
+    return Number.isNaN(date.getTime()) ? label : date.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+  };
+
   return (
-    <ResponsiveContainer width="100%" height="100%">
-      <AreaChart data={merged} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-        <defs>
-          <linearGradient id="tt-created" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor={createdColor} stopOpacity={0.35} />
-            <stop offset="95%" stopColor={createdColor} stopOpacity={0} />
-          </linearGradient>
-          <linearGradient id="tt-resolved" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor={resolvedColor} stopOpacity={0.35} />
-            <stop offset="95%" stopColor={resolvedColor} stopOpacity={0} />
-          </linearGradient>
-        </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
-        <XAxis dataKey="label" stroke={chart.stroke} fontSize={10} tickLine={false} />
-        <YAxis stroke={chart.stroke} fontSize={10} tickLine={false} allowDecimals={false} />
-        <Tooltip
-          contentStyle={{ backgroundColor: chart.tooltipBg, border: `1px solid ${chart.tooltipBorder}`, borderRadius: '8px' }}
-          labelStyle={{ color: chart.tooltipLabel, fontSize: '10px' }}
-          itemStyle={{ color: chart.tooltipText, fontSize: '11px' }}
-        />
-        <Legend wrapperStyle={{ fontSize: '10px' }} />
-        <Area type="monotone" dataKey="created" stroke={createdColor} strokeWidth={2} fill="url(#tt-created)" name="Created" />
-        <Area type="monotone" dataKey="resolved" stroke={resolvedColor} strokeWidth={2} fill="url(#tt-resolved)" name="Resolved" />
-      </AreaChart>
-    </ResponsiveContainer>
+    <div className="h-full flex flex-col" aria-label="Ticket lifecycle trend">
+      <div className="min-h-0 flex-1">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={points} margin={{ top: 16, right: 12, left: 0, bottom: 8 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} strokeOpacity={0.3} vertical={false} />
+            <XAxis
+              dataKey="label"
+              stroke={chart.stroke}
+              fontSize={10}
+              tickLine={false}
+              minTickGap={18}
+              tickFormatter={formatDate}
+            />
+            <YAxis stroke={chart.stroke} fontSize={10} tickLine={false} allowDecimals={false} width={28} />
+            <Tooltip
+              cursor={{ stroke: chart.stroke, strokeDasharray: '4 4', strokeOpacity: 0.7 }}
+              contentStyle={{ backgroundColor: chart.tooltipBg, border: `1px solid ${chart.tooltipBorder}`, borderRadius: 8 }}
+              labelStyle={{ color: chart.tooltipLabel, fontSize: 10 }}
+              itemStyle={{ color: chart.tooltipText, fontSize: 11 }}
+              labelFormatter={(label: string) => `Date: ${formatDate(label)}`}
+            />
+            <Legend verticalAlign="top" align="right" height={26} wrapperStyle={{ fontSize: '10px', paddingBottom: '6px' }} />
+            <Line type="monotone" dataKey="created" name="Created Tickets" stroke="#38bdf8" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 6, strokeWidth: 2 }} isAnimationActive animationDuration={700} />
+            <Line type="monotone" dataKey="inProgress" name="In Progress" stroke="#fbbf24" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 6, strokeWidth: 2 }} isAnimationActive animationDuration={700} />
+            <Line type="monotone" dataKey="aiResolved" name="Resolved by AI" stroke="#a78bfa" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 6, strokeWidth: 2 }} isAnimationActive animationDuration={700} />
+            <Line type="monotone" dataKey="agentResolved" name="Resolved by Agent" stroke="#22d3ee" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 6, strokeWidth: 2 }} isAnimationActive animationDuration={700} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
   );
 };
 

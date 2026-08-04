@@ -11,7 +11,11 @@ from app.schemas.kpi import (
     AICopilotAdminKPIs,
     TicketLifecycleTimeline,
     AICopilotTimeline,
+    AdminAnalytics,
+    AnalyticsMetric,
+    SLAAnalytics,
 )
+from app.services.sla import SLA_TARGET_HOURS, snapshot_for_ticket
 
 
 def _round1(value: float) -> float:
@@ -27,6 +31,19 @@ def _pct(numerator: int, denominator: int) -> float:
 def _hours_between(start: datetime, end: datetime) -> float:
     delta = end - start
     return max(0.0, delta.total_seconds() / 3600)
+
+
+def _coerce_datetime(value: object) -> datetime | None:
+    """Normalize Mongo datetimes and legacy ISO timestamp strings."""
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None) if value.tzinfo else value
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed.replace(tzinfo=None)
+        except ValueError:
+            return None
+    return None
 
 
 def _parse_sla_hours(sla_str: str | None) -> float | None:
@@ -277,23 +294,24 @@ async def compute_agent_kpis(
     resolved_count = len(resolved_closed)
 
     for t in tickets:
-        sla_hours = _parse_sla_hours(t.get("ai_analysis_estimated_sla"))
         created = t.get("created_at")
+        sla = snapshot_for_ticket(t, now)
         if t["status"] in ("Resolved", "Closed"):
+            # SLA classification must not depend on timestamp storage type.
+            # Legacy tickets may use ISO strings instead of BSON datetimes.
+            sla_total += 1
+            if not sla.get("sla_breached"):
+                sla_compliant += 1
             updated = t.get("updated_at")
-            if isinstance(created, datetime) and isinstance(updated, datetime):
-                resolution_hours = _hours_between(created, updated)
+            created_dt = _coerce_datetime(created)
+            updated_dt = _coerce_datetime(updated)
+            if created_dt and updated_dt:
+                resolution_hours = float(sla.get("resolution_duration_hours") or _hours_between(created_dt, updated_dt))
                 mttr_total += resolution_hours
                 mttr_n += 1
-                if sla_hours:
-                    sla_total += 1
-                    if resolution_hours <= sla_hours:
-                        sla_compliant += 1
         elif t["status"] in ("Open", "In Progress"):
-            if sla_hours and isinstance(created, datetime):
-                elapsed = _hours_between(created, now)
-                if elapsed > sla_hours:
-                    overdue += 1
+            if sla.get("sla_breached"):
+                overdue += 1
 
     mttr = _round1(mttr_total / mttr_n) if mttr_n else 0.0
 
@@ -380,21 +398,34 @@ async def compute_admin_kpis(db: AsyncIOMotorDatabase) -> AdminKPIs:
     mttr_n = 0
     sla_compliant = 0
     sla_total = 0
+    active_sla_tickets = 0
+    near_breach_tickets = 0
+    critical_sla_breaches = 0
     resolved_closed = [t for t in tickets if t["status"] in ("Resolved", "Closed")]
     resolved_count = len(resolved_closed)
 
+    for ticket in tickets:
+        sla_snapshot = snapshot_for_ticket(ticket)
+        if sla_snapshot["sla_status"] == "Active":
+            active_sla_tickets += 1
+        elif sla_snapshot["sla_status"] == "Near Breach":
+            near_breach_tickets += 1
+        if ticket.get("priority") == "Critical" and sla_snapshot.get("sla_breached"):
+            critical_sla_breaches += 1
+
     for t in resolved_closed:
-        created = t.get("created_at")
-        updated = t.get("updated_at")
-        if isinstance(created, datetime) and isinstance(updated, datetime):
+        created = _coerce_datetime(t.get("created_at"))
+        updated = _coerce_datetime(t.get("updated_at"))
+        if created and updated:
             resolution_hours = _hours_between(created, updated)
             mttr_total += resolution_hours
             mttr_n += 1
-            sla_hours = _parse_sla_hours(t.get("ai_analysis_estimated_sla"))
-            if sla_hours:
-                sla_total += 1
-                if resolution_hours <= sla_hours:
-                    sla_compliant += 1
+        # Count every terminal ticket in SLA compliance, including legacy
+        # documents whose timestamps are stored as strings.
+        sla = snapshot_for_ticket(t)
+        sla_total += 1
+        if not sla.get("sla_breached"):
+            sla_compliant += 1
 
     org_mttr = _round1(mttr_total / mttr_n) if mttr_n else 0.0
 
@@ -462,6 +493,9 @@ async def compute_admin_kpis(db: AsyncIOMotorDatabase) -> AdminKPIs:
         orgCsatScore=org_csat,
         slaCompliance=sla_compliance_pct,
         slaBreaches=sla_breaches,
+        activeSlaTickets=active_sla_tickets,
+        nearBreachTickets=near_breach_tickets,
+        criticalSlaBreaches=critical_sla_breaches,
         ticketBacklog=backlog,
         aiResolutionRate=ai_resolution_rate,
         aiQueries=ai_queries_count,
@@ -577,4 +611,227 @@ async def get_ai_copilot_timeline(
         chats=_bucket_to_points(chats_counts, keys),
         resolved=_bucket_to_points(resolved_counts, keys),
         escalated=_bucket_to_points(escalated_counts, keys),
+    )
+
+
+async def get_admin_monthly_analytics(
+    db: AsyncIOMotorDatabase, month: int, year: int
+) -> AdminAnalytics:
+    """Return all period-sensitive admin analytics in one database request path."""
+    start = datetime(year, month, 1)
+    end = datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)
+    days = [(start + timedelta(days=i)).strftime("%Y-%m-%d")
+            for i in range((end - start).days)]
+
+    created_match = {"created_at": {"$gte": start, "$lt": end}}
+    resolved_statuses = ["Resolved", "Closed"]
+    ai_resolved_expr = {
+        "$or": [
+            {"$eq": [{"$toLower": {"$ifNull": ["$resolved_by", ""]}}, "ai"]},
+            {"$eq": [{"$toLower": {"$ifNull": ["$resolution_source", ""]}}, "ai"]},
+            {"$eq": [{"$ifNull": ["$ai_resolved", False]}, True]},
+        ]
+    }
+    agent_resolved_expr = {
+        "$and": [
+            {"$in": ["$status", resolved_statuses]},
+            {"$not": [ai_resolved_expr]},
+            {"$or": [
+                {"$ne": [{"$ifNull": ["$resolved_by", ""]}, ""]},
+                {"$ne": [{"$ifNull": ["$assigned_to", ""]}, ""]},
+            ]},
+        ]
+    }
+
+    summary = await db.tickets.aggregate([
+        {"$match": created_match},
+        {"$group": {
+            "_id": None,
+            "totalCreated": {"$sum": 1},
+            "open": {"$sum": {"$cond": [{"$eq": ["$status", "Open"]}, 1, 0]}},
+            "inProgress": {"$sum": {"$cond": [{"$eq": ["$status", "In Progress"]}, 1, 0]}},
+            "resolved": {"$sum": {"$cond": [{"$eq": ["$status", "Resolved"]}, 1, 0]}},
+            "closed": {"$sum": {"$cond": [{"$eq": ["$status", "Closed"]}, 1, 0]}},
+            "aiResolved": {"$sum": {"$cond": [
+                {"$and": [
+                    {"$in": ["$status", resolved_statuses]},
+                    ai_resolved_expr,
+                ]}, 1, 0,
+            ]}},
+            "agentResolved": {"$sum": {"$cond": [
+                {"$and": [
+                    {"$in": ["$status", resolved_statuses]},
+                    {"$not": [ai_resolved_expr]},
+                    {"$or": [
+                        {"$ne": [{"$ifNull": ["$resolved_by", ""]}, ""]},
+                        {"$ne": [{"$ifNull": ["$assigned_to", ""]}, ""]},
+                    ]},
+                ]}, 1, 0,
+            ]}},
+        }},
+    ]).to_list(length=1)
+    totals = summary[0] if summary else {}
+
+    created_rows = await db.tickets.aggregate([
+        {"$match": created_match},
+        {"$group": {
+            "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$created_at"}},
+            "value": {"$sum": 1},
+            "inProgress": {"$sum": {"$cond": [{"$eq": ["$status", "In Progress"]}, 1, 0]}},
+        }},
+    ]).to_list(length=None)
+    resolved_rows = await db.tickets.aggregate([
+        {"$match": {
+            "status": {"$in": resolved_statuses},
+            "updated_at": {"$gte": start, "$lt": end},
+        }},
+        {"$group": {
+            "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$updated_at"}},
+            "value": {"$sum": 1},
+            "aiResolved": {"$sum": {"$cond": [ai_resolved_expr, 1, 0]}},
+            "agentResolved": {"$sum": {"$cond": [agent_resolved_expr, 1, 0]}},
+        }},
+    ]).to_list(length=None)
+    created_by_day = {row["_id"]: row["value"] for row in created_rows}
+    resolved_by_day = {row["_id"]: row for row in resolved_rows}
+    in_progress_by_day = {row["_id"]: row.get("inProgress", 0) for row in created_rows}
+
+    chat_rows = await db.chat_history.aggregate([
+        {"$project": {
+            "session_id": 1,
+            "metadata_json": 1,
+            "event_time": {"$ifNull": ["$timestamp", "$created_at"]},
+        }},
+        {"$match": {"event_time": {"$gte": start, "$lt": end}}},
+        {"$group": {
+            "_id": {
+                "day": {"$dateToString": {"format": "%Y-%m-%d", "date": "$event_time"}},
+                "session": "$session_id",
+            },
+            "escalated": {"$max": {
+                "$cond": [{"$regexMatch": {
+                    "input": {"$ifNull": ["$metadata_json", ""]},
+                    "regex": "ticket_id",
+                }}, 1, 0]
+            }},
+        }},
+        {"$group": {
+            "_id": "$_id.day",
+            "chats": {"$sum": 1},
+            "escalated": {"$sum": "$escalated"},
+        }},
+    ]).to_list(length=None)
+    chat_by_day = {row["_id"]: row for row in chat_rows}
+
+    # Do not rely on a Mongo date-type filter here. Older tickets may contain
+    # ISO timestamps as strings, and excluding those documents makes breached
+    # tickets disappear from SLA compliance. Load all ticket records and apply
+    # the period filter after normalizing both formats.
+    sla_rows = await db.tickets.find(
+        {},
+        {"created_at": 1, "updated_at": 1, "resolved_at": 1, "priority": 1, "status": 1,
+         "sla_started_at": 1, "sla_target_hours": 1, "sla_due_at": 1},
+    ).to_list(length=None)
+    sla_within = 0
+    sla_breached = 0
+    sla_active = 0
+    sla_near_breach = 0
+    sla_by_priority: dict[str, dict[str, float | int | None]] = {
+        priority: {
+            "slaTargetHours": SLA_TARGET_HOURS[priority],
+            "withinSla": 0,
+            "breached": 0,
+            "active": 0,
+            "nearBreach": 0,
+            "resolutionTotal": 0.0,
+            "resolutionCount": 0,
+        }
+        for priority in ("Low", "Medium", "High", "Critical")
+    }
+    for row in sla_rows:
+        created = _coerce_datetime(row.get("created_at") or row.get("updated_at"))
+        if created is None or not (start <= created < end):
+            continue
+        priority = row.get("priority", "Medium")
+        bucket = sla_by_priority.setdefault(priority, {
+            "slaTargetHours": SLA_TARGET_HOURS.get(priority, SLA_TARGET_HOURS["Medium"]),
+            "withinSla": 0, "breached": 0, "active": 0, "nearBreach": 0,
+            "resolutionTotal": 0.0, "resolutionCount": 0,
+        })
+        snapshot = snapshot_for_ticket(row)
+        bucket["slaTargetHours"] = snapshot["sla_target_hours"]
+        current_status = snapshot["sla_status"]
+        if current_status == "Active":
+            sla_active += 1
+            bucket["active"] = int(bucket["active"]) + 1
+        elif current_status == "Near Breach":
+            sla_near_breach += 1
+            bucket["nearBreach"] = int(bucket["nearBreach"]) + 1
+        elif current_status == "Within SLA" or (current_status == "Completed" and not snapshot.get("sla_breached")):
+            sla_within += 1
+            bucket["withinSla"] = int(bucket["withinSla"]) + 1
+        elif current_status in {"Breached", "Completed"} and snapshot.get("sla_breached"):
+            sla_breached += 1
+            bucket["breached"] = int(bucket["breached"]) + 1
+        if snapshot.get("resolution_duration_hours") is not None:
+            bucket["resolutionTotal"] = float(bucket["resolutionTotal"]) + float(snapshot["resolution_duration_hours"])
+            bucket["resolutionCount"] = int(bucket["resolutionCount"]) + 1
+
+    return AdminAnalytics(
+        month=month,
+        year=year,
+        days=days,
+        ticketLifecycle=TicketLifecycleTimeline(
+            created=[{"label": day, "value": created_by_day.get(day, 0)} for day in days],
+            resolved=[{"label": day, "value": resolved_by_day.get(day, {}).get("value", 0)} for day in days],
+            aiResolved=[{"label": day, "value": resolved_by_day.get(day, {}).get("aiResolved", 0)} for day in days],
+            agentResolved=[{"label": day, "value": resolved_by_day.get(day, {}).get("agentResolved", 0)} for day in days],
+            inProgress=[{"label": day, "value": in_progress_by_day.get(day, 0)} for day in days],
+        ),
+        aiCopilot=AICopilotTimeline(
+            chats=[{"label": day, "value": chat_by_day.get(day, {}).get("chats", 0)} for day in days],
+            resolved=[{"label": day, "value": max(0, chat_by_day.get(day, {}).get("chats", 0) - chat_by_day.get(day, {}).get("escalated", 0))} for day in days],
+            escalated=[{"label": day, "value": chat_by_day.get(day, {}).get("escalated", 0)} for day in days],
+        ),
+        resolution=[
+            AnalyticsMetric(name="AI Resolved", value=totals.get("aiResolved", 0)),
+            AnalyticsMetric(name="Agent Resolved", value=totals.get("agentResolved", 0)),
+        ],
+        sla=[
+            AnalyticsMetric(name="Resolved Within SLA", value=sla_within),
+            AnalyticsMetric(name="SLA Breached", value=sla_breached),
+            AnalyticsMetric(name="Active SLA Tickets", value=sla_active),
+            AnalyticsMetric(name="Near Breach", value=sla_near_breach),
+        ],
+        slaByPriority=[
+            SLAAnalytics(
+                priority=priority,
+                slaTargetHours=bucket["slaTargetHours"],
+                withinSla=int(bucket["withinSla"]),
+                breached=int(bucket["breached"]),
+                active=int(bucket["active"]),
+                nearBreach=int(bucket["nearBreach"]),
+                averageResolutionHours=_round1(
+                    float(bucket["resolutionTotal"]) / int(bucket["resolutionCount"])
+                ) if int(bucket["resolutionCount"]) else 0.0,
+                compliance=_pct(
+                    int(bucket["withinSla"]),
+                    int(bucket["withinSla"]) + int(bucket["breached"]),
+                ) if int(bucket["withinSla"]) + int(bucket["breached"]) else 0.0,
+            )
+            for priority, bucket in sla_by_priority.items()
+        ],
+        totals={
+            "totalCreated": totals.get("totalCreated", 0),
+            "open": totals.get("open", 0),
+            "inProgress": totals.get("inProgress", 0),
+            "resolved": totals.get("resolved", 0),
+            "closed": totals.get("closed", 0),
+            "aiResolved": totals.get("aiResolved", 0),
+            "agentResolved": totals.get("agentResolved", 0),
+            "slaWithin": sla_within,
+            "slaBreached": sla_breached,
+            "slaActive": sla_active,
+            "slaNearBreach": sla_near_breach,
+        },
     )

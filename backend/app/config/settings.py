@@ -46,6 +46,15 @@ def _get_list(name: str, default: list[str]) -> list[str]:
 
 @lru_cache
 def get_settings() -> Settings:
+    default_cors_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+    configured_cors_origins = _get_list("CORS_ORIGINS", default_cors_origins)
     return Settings(
         app_name=os.getenv("APP_NAME", "Enterprise ITSM Helpdesk AI Copilot API"),
         app_version=os.getenv("APP_VERSION", "0.1.0"),
@@ -53,7 +62,9 @@ def get_settings() -> Settings:
         debug=_get_bool("DEBUG", False),
         mongodb_uri=os.getenv("MONGODB_URI", "mongodb://localhost:27017"),
         database_name=os.getenv("DATABASE_NAME", "itsm_helpdesk"),
-        cors_origins=_get_list("CORS_ORIGINS", ["http://localhost:3000"]),
+        # Always include local development ports even if an old .env file has
+        # a stale or malformed CORS_ORIGINS value.
+        cors_origins=list(dict.fromkeys(configured_cors_origins + default_cors_origins)),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         reset_token_expire_minutes=int(os.getenv("RESET_TOKEN_EXPIRE_MINUTES", 15)),
         jwt_secret_key=os.getenv("JWT_SECRET_KEY", "change-me-in-local-env"),

@@ -1,14 +1,17 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, Query, status
 
 from app.api.deps import DatabaseSession
 from app.auth.dependencies import get_current_user, require_roles
-from app.schemas.kpi import EmployeeKPIs, AgentKPIs, AdminKPIs, TicketLifecycleTimeline, AICopilotTimeline
+from app.schemas.kpi import EmployeeKPIs, AgentKPIs, AdminKPIs, TicketLifecycleTimeline, AICopilotTimeline, AdminAnalytics
 from app.services.kpi import (
     compute_employee_kpis,
     compute_agent_kpis,
     compute_admin_kpis,
     get_ticket_lifecycle_timeline,
     get_ai_copilot_timeline,
+    get_admin_monthly_analytics,
     TimelineRange,
 )
 
@@ -99,3 +102,18 @@ async def get_admin_ai_copilot_timeline(
     """AI Copilot chats / resolved / escalated timeline for the requested range."""
     r: TimelineRange = "7d" if range not in _ALLOWED_RANGES else range
     return await get_ai_copilot_timeline(db, r)
+
+
+@router.get(
+    "/admin/analytics",
+    response_model=AdminAnalytics,
+    status_code=status.HTTP_200_OK,
+)
+async def get_admin_analytics(
+    db: DatabaseSession,
+    month: int = Query(default=datetime.utcnow().month, ge=1, le=12),
+    year: int = Query(default=datetime.utcnow().year, ge=2000, le=2100),
+    current_user: dict = Depends(require_roles(["Administrator", "admin"])),
+) -> AdminAnalytics:
+    """Return synchronized month/year analytics for the admin dashboard."""
+    return await get_admin_monthly_analytics(db, month, year)

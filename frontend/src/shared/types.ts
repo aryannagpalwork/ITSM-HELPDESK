@@ -48,6 +48,14 @@ export interface Ticket {
   aiAnalysisPossibleRootCause?: string;
   aiAnalysisSuggestedResolution?: string;
   aiAnalysisEstimatedSla?: string;
+  slaTargetHours?: number;
+  slaStartedAt?: string;
+  slaDueAt?: string;
+  slaRemainingHours?: number;
+  slaStatus?: 'Active' | 'Near Breach' | 'Within SLA' | 'Breached' | 'Completed';
+  slaBreached?: boolean;
+  resolutionDurationHours?: number;
+  slaCompliant?: boolean;
   
   // Assigned team
   assignedTeam?: string;
@@ -216,12 +224,43 @@ export interface TimelinePoint {
 export interface TicketLifecycleTimeline {
   created: TimelinePoint[];
   resolved: TimelinePoint[];
+  aiResolved: TimelinePoint[];
+  agentResolved: TimelinePoint[];
+  inProgress: TimelinePoint[];
 }
 
 export interface AICopilotTimeline {
   chats: TimelinePoint[];
   resolved: TimelinePoint[];
   escalated: TimelinePoint[];
+}
+
+export interface AnalyticsMetric {
+  name: string;
+  value: number;
+}
+
+export interface SLAAnalytics {
+  priority: string;
+  slaTargetHours: number | null;
+  withinSla: number;
+  breached: number;
+  active: number;
+  nearBreach: number;
+  averageResolutionHours: number;
+  compliance: number;
+}
+
+export interface AdminAnalytics {
+  month: number;
+  year: number;
+  days: string[];
+  ticketLifecycle: TicketLifecycleTimeline;
+  aiCopilot: AICopilotTimeline;
+  resolution: AnalyticsMetric[];
+  sla: AnalyticsMetric[];
+  slaByPriority: SLAAnalytics[];
+  totals: Record<string, number>;
 }
 
 export type TimelineRange = 'today' | '7d' | '30d';
@@ -270,6 +309,9 @@ export interface AdminKPIs {
   orgCsatScore: number;
   slaCompliance: number;
   slaBreaches: number;
+  activeSlaTickets: number;
+  nearBreachTickets: number;
+  criticalSlaBreaches: number;
   ticketBacklog: number;
   aiResolutionRate: number;
   aiQueries: number;

@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '../../shared/AppContext';
-import { getAdminTicketTimeline, getAdminAICopilotTimeline } from '../../shared/api';
+import { getAdminAnalytics } from '../../shared/api';
 import {
   Ticket,
-  TimelineRange,
-  TicketLifecycleTimeline,
-  AICopilotTimeline,
+  AdminAnalytics,
 } from '../../shared/types';
 
 /**
@@ -60,15 +58,6 @@ const PRIORITY_META: { key: string; name: string }[] = [
   { key: 'critical', name: 'Critical' },
 ];
 
-function rangeCutoff(range: TimelineRange): number {
-  const now = new Date();
-  if (range === 'today') {
-    return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  }
-  const days = range === '30d' ? 30 : 7;
-  return now.getTime() - days * 24 * 60 * 60 * 1000;
-}
-
 function matchesFilter(ticket: Ticket, filter: AdminCardFilter | null): boolean {
   if (!filter) return true;
   if (filter.statuses && !filter.statuses.includes(ticket.status)) return false;
@@ -105,11 +94,12 @@ function statusToActivityType(status: string): RecentActivityItem['type'] {
 export function useAdminDashboard(enabled: boolean) {
   const { adminKPIs, kpisLoading, kpisError, loadAdminKPIs, tickets } = useApp();
 
-  const [range, setRange] = useState<TimelineRange>('7d');
+  const now = new Date();
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [year, setYear] = useState(now.getFullYear());
   const [activeFilter, setActiveFilter] = useState<AdminCardFilter | null>(null);
 
-  const [ticketTimeline, setTicketTimeline] = useState<TicketLifecycleTimeline | null>(null);
-  const [aiTimeline, setAiTimeline] = useState<AICopilotTimeline | null>(null);
+  const [analytics, setAnalytics] = useState<AdminAnalytics | null>(null);
   const [timelinesLoading, setTimelinesLoading] = useState(false);
   const [timelinesError, setTimelinesError] = useState<string | null>(null);
 
@@ -120,16 +110,11 @@ export function useAdminDashboard(enabled: boolean) {
     [tickets],
   );
 
-  const fetchTimelines = useCallback(async (r: TimelineRange) => {
+  const fetchAnalytics = useCallback(async (selectedMonth: number, selectedYear: number) => {
     try {
       setTimelinesLoading(true);
       setTimelinesError(null);
-      const [tl, ai] = await Promise.all([
-        getAdminTicketTimeline(r),
-        getAdminAICopilotTimeline(r),
-      ]);
-      setTicketTimeline(tl);
-      setAiTimeline(ai);
+      setAnalytics(await getAdminAnalytics(selectedMonth, selectedYear));
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Unable to load timeline data';
       console.warn(msg, error);
@@ -139,12 +124,12 @@ export function useAdminDashboard(enabled: boolean) {
     }
   }, []);
 
-  // Fetch timelines on mount and whenever the range changes.
+  // Fetch all period-sensitive dashboard analytics with one request.
   useEffect(() => {
     if (enabled) {
-      fetchTimelines(range);
+      fetchAnalytics(month, year);
     }
-  }, [enabled, range, fetchTimelines]);
+  }, [enabled, month, year, fetchAnalytics]);
 
   // Load KPIs on mount and whenever the local ticket snapshot changes.
   useEffect(() => {
@@ -156,8 +141,8 @@ export function useAdminDashboard(enabled: boolean) {
 
   const refreshAll = useCallback(() => {
     loadAdminKPIs();
-    fetchTimelines(range);
-  }, [loadAdminKPIs, fetchTimelines, range]);
+    fetchAnalytics(month, year);
+  }, [loadAdminKPIs, fetchAnalytics, month, year]);
 
   // Keep a stable reference to the latest refresh logic so the polling
   // interval is created once and always sees the current range.
@@ -165,9 +150,9 @@ export function useAdminDashboard(enabled: boolean) {
   useEffect(() => {
     savedRefresh.current = () => {
       loadAdminKPIs();
-      fetchTimelines(range);
+      fetchAnalytics(month, year);
     };
-  }, [loadAdminKPIs, fetchTimelines, range]);
+  }, [loadAdminKPIs, fetchAnalytics, month, year]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -192,14 +177,15 @@ export function useAdminDashboard(enabled: boolean) {
 
   const clearFilter = useCallback(() => setActiveFilter(null), []);
 
-  // Tickets within the active date range.
+  // Tickets within the active month/year (used only for existing local cards).
   const ticketsInRange = useMemo(() => {
-    const cutoff = rangeCutoff(range);
+    const start = new Date(year, month - 1, 1).getTime();
+    const end = new Date(year, month, 1).getTime();
     return tickets.filter(t => {
       const created = new Date(t.createdAt).getTime();
-      return !Number.isNaN(created) && created >= cutoff;
+      return !Number.isNaN(created) && created >= start && created < end;
     });
-  }, [tickets, range]);
+  }, [tickets, month, year]);
 
   // Tickets matching the active card filter (drives every derived chart).
   const filteredTickets = useMemo(
@@ -258,14 +244,17 @@ export function useAdminDashboard(enabled: boolean) {
   }, [tickets]);
 
   return {
-    range,
-    setRange,
+    month,
+    year,
+    setMonth,
+    setYear,
     activeFilter,
     setActiveFilter,
     toggleFilter,
     clearFilter,
-    ticketTimeline,
-    aiTimeline,
+    analytics,
+    ticketTimeline: analytics?.ticketLifecycle || null,
+    aiTimeline: analytics?.aiCopilot || null,
     timelinesLoading,
     timelinesError,
     statusData,

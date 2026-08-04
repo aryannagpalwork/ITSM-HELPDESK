@@ -18,7 +18,7 @@ import {
 export const TicketDashboard: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { tickets, currentUser, createTicket, loadTickets } = useApp();
+  const { tickets, currentUser, createTicket, loadTickets, ticketsLoading, ticketsError } = useApp();
 
   // Role-aware ticket-detail base path so each role opens the record inside its
   // own layout (matching the admin Incident Service Queue navigation) instead of
@@ -35,6 +35,7 @@ export const TicketDashboard: React.FC = () => {
   const [search, setSearch] = useState(() => searchParams.get('search') ?? '');
   const [statusFilter, setStatusFilter] = useState<string>(() => searchParams.get('status') ?? 'all');
   const [priorityFilter, setPriorityFilter] = useState<string>(() => searchParams.get('priority') ?? 'all');
+  const [slaFilter] = useState<string>(() => searchParams.get('sla') ?? 'all');
   const [sortBy, setSortBy] = useState<string>('newest');
 
   // New Request Form State (within dashboard)
@@ -73,7 +74,17 @@ export const TicketDashboard: React.FC = () => {
     // Priority filter match
     const matchesPriority = priorityFilter === 'all' || ticket.priority === priorityFilter;
 
-    return matchesSearch && matchesStatus && matchesPriority;
+    const matchesSla = (() => {
+      if (slaFilter === 'all') return true;
+      if (slaFilter === 'resolved') return ticket.status === 'resolved' || ticket.status === 'closed';
+      if (slaFilter === 'within') return ticket.slaStatus === 'Within SLA' || ticket.slaCompliant === true;
+      if (slaFilter === 'breached') return ticket.slaBreached === true || ticket.slaStatus === 'Breached';
+      if (slaFilter === 'active') return ticket.slaStatus === 'Active';
+      if (slaFilter === 'near_breach') return ticket.slaStatus === 'Near Breach';
+      return true;
+    })();
+
+    return matchesSearch && matchesStatus && matchesPriority && matchesSla;
   });
 
   // Sort logic
@@ -218,7 +229,26 @@ export const TicketDashboard: React.FC = () => {
       </div>
 
       {/* Main Grid List of Tickets */}
-      {sortedTickets.length === 0 ? (
+      {ticketsLoading ? (
+        <div className="border border-token rounded-2xl p-16 text-center bg-card">
+          <div className="w-8 h-8 mx-auto mb-3 rounded-full border-2 border-token border-t-accent animate-spin" />
+          <h3 className="text-sm font-bold text-secondary">Loading incidents…</h3>
+          <p className="text-xs text-tertiary mt-1">Fetching the latest ticket queue.</p>
+        </div>
+      ) : ticketsError ? (
+        <div className="border border-rose-500/20 rounded-2xl p-10 text-center bg-card">
+          <AlertCircle className="w-10 h-10 text-rose-400 mx-auto mb-3" />
+          <h3 className="text-sm font-bold text-secondary">Tickets could not be loaded</h3>
+          <p className="text-xs text-tertiary max-w-lg mx-auto mt-1.5">{ticketsError}</p>
+          <button
+            type="button"
+            onClick={() => loadTickets({ search, status: statusFilter, priority: priorityFilter, sortBy })}
+            className="mt-4 px-3 py-2 rounded-lg accent-btn text-xs font-semibold"
+          >
+            Retry
+          </button>
+        </div>
+      ) : sortedTickets.length === 0 ? (
         <div className="border border-dashed border-token rounded-2xl p-16 text-center bg-card">
           <AlertCircle className="w-10 h-10 text-tertiary mx-auto mb-3" />
           <h3 className="text-sm font-bold text-secondary">No Incidents Found</h3>
