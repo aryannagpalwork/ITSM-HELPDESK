@@ -17,7 +17,11 @@ import {
   AgentAvailability,
   CurrentlyOnLeave,
 } from './types';
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+// Use the browser's host by default so the UI also works when opened through
+// localhost, a LAN address, or another development hostname. Set
+// VITE_API_BASE_URL when the API is hosted separately.
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
+  || `${window.location.protocol}//${window.location.hostname || '127.0.0.1'}:8000`;
 const ACCESS_TOKEN_KEY = 'it_copilot_access_token';
 const REFRESH_TOKEN_KEY = 'it_copilot_refresh_token';
 
@@ -35,6 +39,7 @@ export interface AdminAgent {
   last_assigned_at?: string | null;
   status?: string | null;
   is_active: boolean;
+  on_leave_today?: boolean;
 }
 
 export interface AdminAgentTicket {
@@ -879,7 +884,18 @@ export const listAdminAgents = async (query: {
   department?: string;
   specialization?: string;
   availability?: string;
-} = {}): Promise<{ items: AdminAgent[]; total: number; page: number; page_size: number; pages: number }> => {
+} = {}): Promise<{
+  items: AdminAgent[];
+  total: number;
+  page: number;
+  page_size: number;
+  pages: number;
+  available_count: number;
+  on_leave_count: number;
+  active_ticket_count: number;
+  total_assigned: number;
+  total_resolved: number;
+}> => {
   const params = new URLSearchParams();
   if (query.page) params.set('page', String(query.page));
   if (query.pageSize) params.set('page_size', String(query.pageSize));

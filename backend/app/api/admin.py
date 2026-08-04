@@ -16,6 +16,7 @@ from app.services.tickets import get_agent_metrics
 from app.auth.security import hash_password
 from app.schemas.user import UserRead, UserCreate, AdminUserCreate, UserUpdate, UserRoleUpdate, UserStatus
 from app.auth.dependencies import FRONTEND_TO_INTERNAL
+from app.services.leaves import list_currently_on_leave
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -112,6 +113,7 @@ class AdminAgentRead(BaseModel):
     last_assigned_at: datetime | None = None
     status: str | None = None
     is_active: bool = True
+    on_leave_today: bool = False
 
 
 class AdminAgentListResponse(BaseModel):
@@ -120,6 +122,11 @@ class AdminAgentListResponse(BaseModel):
     page: int
     page_size: int
     pages: int
+    available_count: int = 0
+    on_leave_count: int = 0
+    active_ticket_count: int = 0
+    total_assigned: int = 0
+    total_resolved: int = 0
 
 
 class AdminAgentTicketRead(BaseModel):
@@ -143,17 +150,17 @@ class AdminAgentTicketListResponse(BaseModel):
     summary: dict[str, int] = Field(default_factory=dict)
 
 
-def _map_agent_to_read(agent: dict) -> AdminAgentRead:
+def _map_agent_to_read(agent: dict, *, on_leave_today: bool = False) -> AdminAgentRead:
     return AdminAgentRead(
         id=agent["_id"], full_name=agent.get("full_name", ""), email=agent.get("email", ""),
         department=agent.get("department"), specialization=agent.get("specialization"),
-        availability=agent.get("availability", "Available"),
+        availability="On Leave" if on_leave_today else agent.get("availability", "Available"),
         max_capacity=agent.get("max_capacity") or 10,
         active_ticket_count=agent.get("active_ticket_count") or 0,
         total_assigned=agent.get("total_assigned") or 0,
         total_resolved=agent.get("total_resolved") or 0,
         last_assigned_at=agent.get("last_assigned_at"), status=agent.get("status"),
-        is_active=agent.get("is_active", True),
+        is_active=agent.get("is_active", True), on_leave_today=on_leave_today,
     )
 
 
@@ -179,15 +186,30 @@ async def list_admin_agents(
         query["department"] = {"$regex": department, "$options": "i"}
     if specialization:
         query["specialization"] = {"$regex": specialization, "$options": "i"}
-    if availability:
+    if availability and availability != "On Leave":
         query["availability"] = availability
 
-    total = await db.users.count_documents(query)
+    all_agents = await db.users.find(query).sort([("full_name", 1), ("_id", 1)]).to_list(length=None)
+    leave_rows = await list_currently_on_leave(db)
+    leave_agent_ids = {row.agent_id for row in leave_rows}
+    mapped_agents = [
+        _map_agent_to_read(agent, on_leave_today=agent["_id"] in leave_agent_ids)
+        for agent in all_agents
+    ]
+    if availability:
+        mapped_agents = [agent for agent in mapped_agents if agent.availability == availability]
+
+    total = len(mapped_agents)
     skip = (page - 1) * page_size
-    agents = await db.users.find(query).sort([("full_name", 1), ("_id", 1)]).skip(skip).limit(page_size).to_list(length=page_size)
+    agents = mapped_agents[skip:skip + page_size]
     return AdminAgentListResponse(
-        items=[_map_agent_to_read(agent) for agent in agents], total=total,
+        items=agents, total=total,
         page=page, page_size=page_size, pages=(total + page_size - 1) // page_size if total else 0,
+        available_count=sum(agent.availability == "Available" for agent in mapped_agents),
+        on_leave_count=sum(agent.on_leave_today for agent in mapped_agents),
+        active_ticket_count=sum(agent.active_ticket_count for agent in mapped_agents),
+        total_assigned=sum(agent.total_assigned for agent in mapped_agents),
+        total_resolved=sum(agent.total_resolved for agent in mapped_agents),
     )
 
 
@@ -200,7 +222,9 @@ async def get_admin_agent(
     agent = await db.users.find_one({"_id": agent_id, "role": "agent", "deleted": {"$ne": True}})
     if agent is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found.")
-    return _map_agent_to_read(agent)
+    leave_rows = await list_currently_on_leave(db)
+    leave_agent_ids = {row.agent_id for row in leave_rows}
+    return _map_agent_to_read(agent, on_leave_today=agent_id in leave_agent_ids)
 
 
 @router.get("/agents/{agent_id}/tickets", response_model=AdminAgentTicketListResponse, status_code=status.HTTP_200_OK)
