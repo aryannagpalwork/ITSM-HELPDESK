@@ -169,44 +169,64 @@ async def _get_first_response_map(
     return result
 
 
+def _ai_conversation_is_resolved(conversation: dict) -> bool:
+    if conversation.get("resolved_by_ai") is True:
+        return True
+    status = str(conversation.get("conversation_status") or "").upper()
+    return status in {"RESOLVED", "LIKELY_RESOLVED"}
+
+
+def _ai_conversation_is_escalated(conversation: dict) -> bool:
+    if conversation.get("escalated") is True:
+        return True
+    status = str(conversation.get("conversation_status") or "").upper()
+    if conversation.get("ticket_id"):
+        return True
+    return status == "ESCALATED"
+
+
+async def _get_ai_conversation_rows(
+    db: AsyncIOMotorDatabase, user_id: str | None = None
+) -> list[dict]:
+    if not hasattr(db, "ai_conversations"):
+        return []
+    query = {"user_id": user_id} if user_id is not None else {}
+    return await db.ai_conversations.find(query).to_list(length=None)
+
+
 async def _get_chat_stats_for_user(
     db: AsyncIOMotorDatabase, user_id: str
 ) -> dict:
-    sessions_cursor = db.chat_history.aggregate([
-        {"$match": {"user_id": user_id}},
-        {"$group": {"_id": "$session_id", "count": {"$sum": 1}}},
-    ])
-    sessions = await sessions_cursor.to_list(length=None)
-    total_sessions = len(sessions)
+    conversations = await _get_ai_conversation_rows(db, user_id=user_id)
+    if not conversations:
+        sessions_cursor = db.chat_history.aggregate([
+            {"$match": {"user_id": user_id}},
+            {"$group": {"_id": "$session_id", "count": {"$sum": 1}}},
+        ])
+        sessions = await sessions_cursor.to_list(length=None)
+        total_sessions = len(sessions)
+        escalated = await db.chat_history.count_documents({
+            "user_id": user_id,
+            "metadata_json": {"$regex": r"ticket_id"},
+        })
+        resolved_assistant = await db.chat_history.count_documents({
+            "user_id": user_id,
+            "role": "assistant",
+        })
+        ai_resolved = max(0, total_sessions - escalated) if total_sessions else 0
+        if resolved_assistant < total_sessions:
+            ai_resolved = min(ai_resolved, resolved_assistant)
+        return {
+            "total_sessions": total_sessions,
+            "ai_resolved": ai_resolved,
+            "escalated": escalated,
+            "kb_hits": 0,
+        }
 
-    escalated = await db.chat_history.count_documents({
-        "user_id": user_id,
-        "metadata_json": {"$regex": r"ticket_id"},
-    })
-
-    resolved_assistant = await db.chat_history.count_documents({
-        "user_id": user_id,
-        "role": "assistant",
-    })
-    ai_resolved = max(0, total_sessions - escalated) if total_sessions else 0
-    if resolved_assistant < total_sessions:
-        ai_resolved = min(ai_resolved, resolved_assistant)
-
-    kb_hits_raw = await db.chat_history.find({
-        "user_id": user_id,
-        "role": "assistant",
-        "metadata_json": {"$exists": True},
-    }).to_list(length=None)
-    kb_hits = 0
-    import json as _json
-    for rec in kb_hits_raw:
-        try:
-            meta = _json.loads(rec.get("metadata_json") or "{}")
-            if meta.get("retrieved_documents", 0) > 0:
-                kb_hits += 1
-        except Exception:
-            pass
-
+    total_sessions = len(conversations)
+    escalated = sum(1 for conversation in conversations if _ai_conversation_is_escalated(conversation))
+    ai_resolved = sum(1 for conversation in conversations if _ai_conversation_is_resolved(conversation))
+    kb_hits = sum(1 for conversation in conversations if conversation.get("retrieved_documents", 0) > 0)
     return {
         "total_sessions": total_sessions,
         "ai_resolved": ai_resolved,
@@ -476,28 +496,36 @@ async def compute_admin_kpis(db: AsyncIOMotorDatabase) -> AdminKPIs:
     else:
         org_csat = 0.0
 
-    total_chat_sessions = await db.chat_history.distinct("session_id")
-    ai_queries_count = len(total_chat_sessions)
+    conversations = await _get_ai_conversation_rows(db)
+    if conversations:
+        ai_queries_count = len(conversations)
+        escalated_tickets_from_chat = sum(1 for conversation in conversations if _ai_conversation_is_escalated(conversation))
+        ai_resolved_count = sum(1 for conversation in conversations if _ai_conversation_is_resolved(conversation))
+        ai_resolution_rate = _pct(ai_resolved_count, ai_queries_count)
+        knowledge_hits = sum(1 for conversation in conversations if conversation.get("retrieved_documents", 0) > 0)
+    else:
+        total_chat_sessions = await db.chat_history.distinct("session_id")
+        ai_queries_count = len(total_chat_sessions)
 
-    escalated_tickets_from_chat = await db.chat_history.count_documents({
-        "metadata_json": {"$regex": r"ticket_id"},
-    })
-    ai_resolved_count = max(0, ai_queries_count - escalated_tickets_from_chat)
-    ai_resolution_rate = _pct(ai_resolved_count, ai_queries_count)
+        escalated_tickets_from_chat = await db.chat_history.count_documents({
+            "metadata_json": {"$regex": r"ticket_id"},
+        })
+        ai_resolved_count = max(0, ai_queries_count - escalated_tickets_from_chat)
+        ai_resolution_rate = _pct(ai_resolved_count, ai_queries_count)
 
-    import json as _json
-    kb_kursor = db.chat_history.find({
-        "role": "assistant",
-        "metadata_json": {"$exists": True},
-    })
-    knowledge_hits = 0
-    async for rec in kb_kursor:
-        try:
-            meta = _json.loads(rec.get("metadata_json") or "{}")
-            if meta.get("retrieved_documents", 0) > 0:
-                knowledge_hits += 1
-        except Exception:
-            pass
+        import json as _json
+        kb_kursor = db.chat_history.find({
+            "role": "assistant",
+            "metadata_json": {"$exists": True},
+        })
+        knowledge_hits = 0
+        async for rec in kb_kursor:
+            try:
+                meta = _json.loads(rec.get("metadata_json") or "{}")
+                if meta.get("retrieved_documents", 0) > 0:
+                    knowledge_hits += 1
+            except Exception:
+                pass
 
     ai = AICopilotAdminKPIs(
         totalAIChats=ai_queries_count,
@@ -633,27 +661,45 @@ async def get_ai_copilot_timeline(
     else:
         start = datetime(now.year, now.month, now.day) - timedelta(days=days - 1)
 
-    chats = await db.chat_history.find({"timestamp": {"$gte": start}}).to_list(length=None)
-
     keys = _build_bucket_keys(r, now)
     chats_counts: Dict[str, int] = {k: 0 for k in keys}
     escalated_counts: Dict[str, int] = {k: 0 for k in keys}
 
-    user_sessions_per_bucket: Dict[str, set] = {k: set() for k in keys}
-    for msg in chats:
-        ts = msg.get("timestamp")
-        if not isinstance(ts, datetime):
-            continue
-        b = _date_bucket(r, ts)
-        if b not in chats_counts:
-            continue
-        sid = msg.get("session_id")
-        if isinstance(sid, str) and sid and sid not in user_sessions_per_bucket[b]:
-            user_sessions_per_bucket[b].add(sid)
-            chats_counts[b] += 1
-        meta = msg.get("metadata_json")
-        if isinstance(meta, str) and 'ticket_id' in meta:
-            escalated_counts[b] += 1
+    ai_conversations = await _get_ai_conversation_rows(db)
+    if ai_conversations:
+        user_sessions_per_bucket: Dict[str, set] = {k: set() for k in keys}
+        for conversation in ai_conversations:
+            ts = conversation.get("created_at") or conversation.get("first_message_at")
+            if not isinstance(ts, datetime):
+                continue
+            if ts < start:
+                continue
+            b = _date_bucket(r, ts)
+            if b not in chats_counts:
+                continue
+            sid = conversation.get("conversation_id") or conversation.get("session_id")
+            if isinstance(sid, str) and sid and sid not in user_sessions_per_bucket[b]:
+                user_sessions_per_bucket[b].add(sid)
+                chats_counts[b] += 1
+            if _ai_conversation_is_escalated(conversation):
+                escalated_counts[b] += 1
+    else:
+        chats = await db.chat_history.find({"timestamp": {"$gte": start}}).to_list(length=None)
+        user_sessions_per_bucket: Dict[str, set] = {k: set() for k in keys}
+        for msg in chats:
+            ts = msg.get("timestamp")
+            if not isinstance(ts, datetime):
+                continue
+            b = _date_bucket(r, ts)
+            if b not in chats_counts:
+                continue
+            sid = msg.get("session_id")
+            if isinstance(sid, str) and sid and sid not in user_sessions_per_bucket[b]:
+                user_sessions_per_bucket[b].add(sid)
+                chats_counts[b] += 1
+            meta = msg.get("metadata_json")
+            if isinstance(meta, str) and 'ticket_id' in meta:
+                escalated_counts[b] += 1
 
     resolved_counts = {
         k: max(0, chats_counts[k] - escalated_counts[k]) for k in keys

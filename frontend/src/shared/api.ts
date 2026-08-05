@@ -1141,6 +1141,22 @@ export const escalateToTicket = async (sessionId: string, userFeedback?: string)
   return mapTicket(await response.json());
 };
 
+export const submitAIChatFeedback = async (
+  sessionId: string,
+  feedback: 'positive' | 'negative'
+): Promise<{ conversation_id: string; feedback: 'positive' | 'negative'; resolved_by_ai: boolean }> => {
+  const response = await apiFetch(`${API_BASE_URL}/chat/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: sessionId, feedback }),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Feedback submission failed' }));
+    throw new Error(error.detail || 'Feedback submission failed');
+  }
+  return await response.json();
+};
+
 export const getAgentMetrics = async (): Promise<Record<string, number>> => {
   const response = await apiFetch(`${API_BASE_URL}/tickets/metrics/agent`);
   if (!response.ok) {

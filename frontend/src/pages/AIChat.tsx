@@ -3,7 +3,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useApp } from '../shared/AppContext';
 import { useTheme } from '../shared/ThemeContext';
 import { ChatMessage, TicketPriority } from '../shared/types';
-import { sendChat, escalateToTicket } from '../shared/api';
+import { sendChat, escalateToTicket, submitAIChatFeedback } from '../shared/api';
+import type { SatisfactionCard } from '../shared/types';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -41,6 +42,8 @@ export const AIChat: React.FC = () => {
   } | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [collapsedMessages, setCollapsedMessages] = useState<Record<string, boolean>>({});
+  const [activeSatisfactionCard, setActiveSatisfactionCard] = useState<SatisfactionCard | null>(null);
+  const [conversationStatus, setConversationStatus] = useState<'ACTIVE' | 'INVESTIGATING' | 'WAITING_FOR_USER' | 'LIKELY_RESOLVED' | 'ESCALATED' | 'RESOLVED'>('ACTIVE');
 
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -122,6 +125,17 @@ export const AIChat: React.FC = () => {
 
       setSessionId(response.session_id);
 
+      // Satisfaction is now driven by the backend conversation tracker, NOT
+      // by searching the answer for plain-text prompts.
+      if (response.satisfaction_card?.show && !activeSatisfactionCard) {
+        setActiveSatisfactionCard(response.satisfaction_card);
+        if (response.satisfaction_card.reason === 'POSITIVE_TREND') {
+          setConversationStatus('LIKELY_RESOLVED');
+        } else if (response.satisfaction_card.reason === 'NEGATIVE_STALL') {
+          setConversationStatus('WAITING_FOR_USER');
+        }
+      }
+
       simulateTyping(response.answer, `bot_${Date.now()}`);
 
       if (response.suggested_ticket) {
@@ -145,7 +159,8 @@ export const AIChat: React.FC = () => {
     }
   };
 
-    const [isEscalating, setIsEscalating] = useState(false);
+  const [isEscalating, setIsEscalating] = useState(false);
+  const [isFeedbackLoading, setIsFeedbackLoading] = useState(false);
 
   const handleConvertTicket = async () => {
     if (!suggestedTicket || !sessionId || isEscalating) return;
@@ -188,7 +203,76 @@ export const AIChat: React.FC = () => {
       setIsTyping(false);
       setIsEscalating(false);
     }
-  };  const toggleCollapse = (msgId: string) => {
+  };
+
+  const handleSatisfactionResolved = async () => {
+    if (!activeSatisfactionCard || isFeedbackLoading) return;
+    const sid = activeSatisfactionCard.session_id || sessionId;
+    setIsFeedbackLoading(true);
+    try {
+      if (sid) {
+        await submitAIChatFeedback(sid, 'positive');
+      }
+      setConversationStatus('RESOLVED');
+      setActiveSatisfactionCard(null);
+      const resolvedMsg = 'Thank you for the update. I’m glad I could help — feel free to reach out any time.';
+      setMessages(prev => [...prev, { id: `assist_${Date.now()}`, sender: 'assistant', text: resolvedMsg, timestamp: new Date().toISOString() }]);
+    } catch (error) {
+      console.error('[Satisfaction Feedback] Failed:', error);
+    } finally {
+      setIsFeedbackLoading(false);
+    }
+  };
+
+  const handleSatisfactionCreateTicket = async () => {
+    if (isFeedbackLoading) return;
+    const sid = activeSatisfactionCard?.session_id || sessionId;
+    setIsFeedbackLoading(true);
+    setIsEscalating(true);
+    setIsTyping(true);
+    const uniqueId = `sys_${sid ? sid.slice(0, 8) : 'unknown'}_${Date.now()}`;
+    try {
+      if (sid) {
+        try { await submitAIChatFeedback(sid, 'negative'); } catch (_f) { /* ignore secondary feedback errors */ }
+      }
+      if (sid && !suggestedTicket) {
+        // No pre-generated suggested_ticket? Call escalateToTicket directly anyway.
+        // The endpoint will generate one from chat history.
+      }
+      if (suggestedTicket && sid) {
+        await handleConvertTicket();
+      } else if (sid) {
+        const newTicket = await escalateToTicket(sid, 'AI could not resolve; user requested ticket from satisfaction card.');
+        await loadTickets();
+        const confirmationMsg: ChatMessage = {
+          id: uniqueId,
+          sender: 'system',
+          text: `✅ **IT Incident Ticket Created Successfully!**\n\n**Ticket Reference:** ${newTicket.ticketNumber || newTicket.id}\n**Priority:** ${newTicket.priority.toUpperCase()}\n**Status:** OPEN\n\nYou can view and track this ticket in the Ticket Queue.`,
+          timestamp: new Date().toISOString()
+        };
+        setMessages(prev => [...prev, confirmationMsg]);
+      }
+      setConversationStatus('ESCALATED');
+      setActiveSatisfactionCard(null);
+      setSuggestedTicket(null);
+    } catch (error) {
+      console.error('[Satisfaction Ticket] Failed:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to create support ticket. Please try again.';
+      const errorMsg: ChatMessage = {
+        id: `err_${sid ? sid.slice(0, 8) : 'unknown'}_${Date.now()}`,
+        sender: 'system',
+        text: `❌ **Ticket Creation Failed**\n\n${errorMessage}\n\nPlease try again or contact IT support directly.`,
+        timestamp: new Date().toISOString()
+      };
+      setMessages(prev => [...prev, errorMsg]);
+    } finally {
+      setIsFeedbackLoading(false);
+      setIsEscalating(false);
+      setIsTyping(false);
+    }
+  };
+
+  const toggleCollapse = (msgId: string) => {
     setCollapsedMessages(prev => ({
       ...prev,
       [msgId]: !prev[msgId]
@@ -197,6 +281,81 @@ export const AIChat: React.FC = () => {
 
   const shouldCollapse = (text: string) => {
     return text.length > 1200;
+  };
+
+  const renderSatisfactionCard = () => {
+    if (!activeSatisfactionCard?.show) return null;
+    const isPositive = activeSatisfactionCard.reason === 'POSITIVE_TREND';
+    const title = isPositive
+      ? 'Glad that helped — was your issue fully resolved?'
+      : 'Let me help escalate this for you';
+    const subtitle = isPositive
+      ? 'Quick feedback below helps our training models.'
+      : 'It looks like we haven’t been able to resolve your issue yet. Would you like to open an official IT support ticket?';
+    return (
+      <div className="flex justify-center mt-2">
+        <div
+          className="max-w-xl w-full rounded-2xl p-5"
+          style={{
+            backgroundColor: isPositive ? tokens.statusSuccessBg : tokens.statusWarningBg,
+            border: `1px solid ${isPositive ? tokens.statusSuccess : tokens.statusWarning}26`,
+          }}
+        >
+          <div className="flex items-center space-x-2 mb-2">
+            <MessageSquare
+              className="w-4 h-4"
+              style={{ color: isPositive ? tokens.statusSuccess : tokens.statusWarning }}
+            />
+            <h5 className="text-xs font-bold" style={{ color: 'var(--text-primary)' }}>
+              {title}
+            </h5>
+          </div>
+          <p
+            className="text-[11px] leading-relaxed mb-4"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            {subtitle}
+          </p>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <button
+              disabled={isFeedbackLoading}
+              className="flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+              style={{
+                backgroundColor: tokens.statusSuccess,
+                color: 'white',
+              }}
+              onMouseEnter={(e) => {
+                if (!isFeedbackLoading) e.currentTarget.style.opacity = '0.9';
+              }}
+              onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
+              onClick={handleSatisfactionResolved}
+            >
+              Yes, Issue Resolved
+            </button>
+            <button
+              disabled={isFeedbackLoading || isEscalating}
+              className="flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed border shadow-sm"
+              style={{
+                backgroundColor: tokens.statusWarningBg,
+                color: 'var(--text-primary)',
+                borderColor: `${tokens.statusWarning}55`,
+              }}
+              onMouseEnter={(e) => {
+                if (!isFeedbackLoading && !isEscalating) {
+                  e.currentTarget.style.backgroundColor = tokens.statusWarning + '26';
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = tokens.statusWarningBg;
+              }}
+              onClick={handleSatisfactionCreateTicket}
+            >
+              No, Create Support Ticket
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -227,6 +386,8 @@ export const AIChat: React.FC = () => {
               setSuggestedTicket(null);
               setSessionId(null);
               setCollapsedMessages({});
+              setActiveSatisfactionCard(null);
+              setConversationStatus('ACTIVE');
             }}
             className="p-1.5 rounded-lg transition-all text-[10px] flex items-center gap-1.5 cursor-pointer border"
             style={{ backgroundColor: 'var(--card-bg-solid)', color: 'var(--text-secondary)', borderColor: 'var(--border)' }}
@@ -479,6 +640,9 @@ export const AIChat: React.FC = () => {
               </div>
             </div>
           )}
+
+          {/* Conversation Satisfaction Prompt — rendered exactly once when the backend signals it. */}
+          {renderSatisfactionCard()}
         </div>
 
         {/* Input Bar Section */}

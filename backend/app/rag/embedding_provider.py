@@ -237,5 +237,28 @@ class EmbeddingProviderFactory:
     
     @staticmethod
     def create(provider_name: str, **kwargs) -> EmbeddingProvider:
-        """Create an OpenAI embedding provider instance."""
-        return OpenAIEmbeddingProvider(**kwargs)
+        """Create an embedding provider instance by provider name.
+
+        Supported providers:
+          - "openai"           -> OpenAIEmbeddingProvider (OpenAI / Azure text-embedding-*)
+          - "huggingface"      -> SentenceTransformersEmbeddingProvider (local sentence-transformers)
+          - "ollama", "gemini" -> Raise EmbeddingError (planned, not yet implemented)
+
+        Raises:
+            EmbeddingError: if the requested provider is unknown or not implemented.
+        """
+        key = (provider_name or "").strip().lower()
+        if key == "openai":
+            return OpenAIEmbeddingProvider(**kwargs)
+        if key in {"huggingface", "sentence_transformers", "sentence-transformers"}:
+            return SentenceTransformersEmbeddingProvider(**kwargs)
+        if key in {"ollama", "gemini", "anthropic"}:
+            raise EmbeddingError(
+                f"Embedding provider '{provider_name}' is configured but not implemented. "
+                f"Set EMBEDDING_PROVIDER=openai (supported) or implement the provider in "
+                f"app/rag/embedding_provider.py."
+            )
+        raise EmbeddingError(
+            f"Unknown embedding provider '{provider_name}'. "
+            f"Supported: openai, huggingface."
+        )
