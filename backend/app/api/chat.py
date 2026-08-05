@@ -1,3 +1,4 @@
+import os
 import re
 from uuid import uuid4
 import logging
@@ -18,9 +19,11 @@ from app.schemas.knowledge_document import (
     ChatRequest,
     ChatResponse,
     ChatMessageInput,
-    RetrievedDocumentSource,
+    ConversationTracker,
     EscalateToTicketRequest,
     GeneratedTicketDetails,
+    RetrievedDocumentSource,
+    SatisfactionCard,
 )
 from app.schemas.ticket import TicketCreate, TicketRead, TicketPriority
 from app.services.password_reset import PasswordResetService
@@ -39,8 +42,7 @@ from app.rag.retriever import RetrievedContext
 logger = logging.getLogger(__name__)
 
 NO_KB_MATCH_RESPONSE = (
-    "I couldn't find this information in the Knowledge Base. "
-    "Please raise a support ticket if you need further assistance."
+    "I couldn't find relevant information in the organization's Knowledge Base."
 )
 
 GREETING_PHRASES = {
@@ -72,6 +74,288 @@ def _greeting_prompt(query: str) -> BuiltPrompt:
         context_used=context,
         metadata={"query_type": "GREETING"},
     )
+
+
+DEFAULT_TROUBLESHOOTING_FAILURE_THRESHOLD = int(os.getenv("TROUBLESHOOTING_FAILURE_THRESHOLD", "3"))
+
+# Expanded lexicons match the user-provided examples (rule 7 positive / 10 negative).
+POSITIVE_SENTIMENT_PATTERNS: tuple[str, ...] = (
+    "thanks", "thank you", "thx", "worked", "fixed", "solved", "got it",
+    "makes sense", "yes", "okay it works", "ok it works", "perfect", "awesome",
+    "it works", "now working", "working now", "all set", "great", "that fixed it",
+    "resolved", "appreciate it", "cool", "nice", "yep",
+)
+
+NEGATIVE_SENTIMENT_PATTERNS: tuple[str, ...] = (
+    "still not working", "still broken", "still failing", "still stuck",
+    "didn't help", "did not help", "same issue", "error persists", "not resolved",
+    "that's not it", "that is not it", "doesn't work", "does not work",
+    "failed", "no change", "still an issue", "still have the problem",
+    "still experiencing", "still cant", "still can't", "still having",
+    "still no luck", "no luck", "nope",
+)
+
+# These strongly negative signals should NOT auto-label a plain "no" reply when
+# "no" is used as a polite filler.  Detect explicit "no" patterns separately.
+_STRONG_NEGATIVE_PATTERNS: tuple[str, ...] = tuple(
+    p for p in NEGATIVE_SENTIMENT_PATTERNS if p != "nope"
+)
+
+
+def _classify_user_sentiment(query: str) -> str:
+    """Classify a user reply as positive / neutral / negative.
+
+    Positive signals match the explicit resolution confirmations from the
+    requirements.  Negative signals only match multi-word or unambiguous
+    negative phrases so a bare "no" used out-of-context is treated as neutral.
+    """
+    normalized = re.sub(r"[^a-z0-9\s']", " ", (query or "").lower()).strip()
+    if not normalized:
+        return "neutral"
+
+    for pattern in POSITIVE_SENTIMENT_PATTERNS:
+        if pattern in normalized:
+            # guard against false positive: "that didn't work" contains "work"
+            # but is not positive — the negative multi-word checks below catch
+            # that earlier in this function.
+            if pattern in {"worked", "works", "work", "it works"}:
+                if any(p in normalized for p in _STRONG_NEGATIVE_PATTERNS):
+                    return "negative"
+            return "positive"
+
+    for pattern in NEGATIVE_SENTIMENT_PATTERNS:
+        if pattern in normalized:
+            return "negative"
+
+    # Bare "no" surrounded only by punctuation — classify as "negative" only if
+    # the message is essentially just "no".  Otherwise neutral.
+    bare = re.sub(r"[^a-z]", "", normalized)
+    if bare in {"no", "nope"} and len(normalized.split()) <= 3:
+        return "negative"
+
+    return "neutral"
+
+
+# ─── In-memory conversation tracker registry ────────────────────────────────
+# We track richer state (sentiment, counters, likely_resolution) per session
+# here.  If a session restarts or the user clicks Reset Thread, a new
+# session_id arrives and we get a fresh ConversationTracker automatically.
+_CONVERSATION_TRACKERS: dict[str, ConversationTracker] = {}
+
+
+def _get_or_create_tracker(session_id: str | None) -> ConversationTracker:
+    if not session_id:
+        return ConversationTracker()
+    if session_id not in _CONVERSATION_TRACKERS:
+        _CONVERSATION_TRACKERS[session_id] = ConversationTracker()
+    return _CONVERSATION_TRACKERS[session_id]
+
+
+def _should_show_satisfaction_card(tracker: ConversationTracker) -> tuple[bool, str | None]:
+    """Apply the 5 user-specified satisfaction prompt rules.
+
+    Returns:
+        (show_card: bool, reason: "POSITIVE_TREND" | "NEGATIVE_STALL" | None)
+    """
+    # Rule 4: never ask twice.
+    if tracker.satisfaction_prompt_shown:
+        return False, None
+
+    # Rule 1: never ask before at least 2 user replies.
+    if tracker.total_user_messages < 2:
+        return False, None
+
+    trend = tracker.sentiment_trend
+
+    # Rule 2: positive trend + likely solution already provided → show card
+    # after 2+ productive iterations (user_msg >= 2 already).
+    if trend == "positive" and tracker.likely_resolution_provided and tracker.total_user_messages >= 2:
+        return True, "POSITIVE_TREND"
+
+    # Rule 3: negative trend continues for 2-3 unsuccessful iterations → show.
+    if (
+        trend == "negative"
+        and tracker.troubleshooting_iterations >= 3
+        and tracker.total_user_messages >= 2
+    ):
+        return True, "NEGATIVE_STALL"
+
+    # Mild: after 2 unsuccessful negative signals (without strong resolution) we
+    # surface the card so feedback is still captured.
+    if (
+        trend == "negative"
+        and tracker.troubleshooting_iterations >= 2
+        and tracker.total_user_messages >= 3
+    ):
+        return True, "NEGATIVE_STALL"
+
+    return False, None
+
+
+
+async def _get_conversation_state(
+    db: DatabaseSession,
+    session_id: str | None,
+) -> tuple[str, dict]:
+    """Get the current conversation state and metadata for the active interaction."""
+    if not session_id:
+        return "ACTIVE", {"conversation_state": "ACTIVE", "unsuccessful_troubleshooting_iterations": 0}
+
+    last_assistant = await db["chat_history"].find_one(
+        {"session_id": session_id, "role": "assistant"},
+        sort=[("created_at", -1)],
+    )
+    if not last_assistant:
+        return "ACTIVE", {"conversation_state": "ACTIVE", "unsuccessful_troubleshooting_iterations": 0}
+
+    metadata = {}
+    if last_assistant.get("metadata_json"):
+        try:
+            metadata = json.loads(last_assistant["metadata_json"])
+        except (json.JSONDecodeError, TypeError):
+            metadata = {}
+
+    state = metadata.get("conversation_state") or "ACTIVE"
+    iterations = int(metadata.get("unsuccessful_troubleshooting_iterations", 0) or 0)
+    return state, {"conversation_state": state, "unsuccessful_troubleshooting_iterations": iterations}
+
+
+def _update_conversation_metadata(
+    current_state: str,
+    query: str,
+    existing_metadata: dict | None = None,
+    *,
+    tracker: ConversationTracker | None = None,
+) -> tuple[str, dict]:
+    """Update the conversation state AND feed the latest user message to the
+    ConversationTracker.  The structured SatisfactionCard (not plain text) is
+    decided later in the chat endpoint, NOT here."""
+    metadata = dict(existing_metadata or {})
+    state = current_state or "ACTIVE"
+
+    sentiment = _classify_user_sentiment(query) if query else "neutral"
+    if tracker is not None:
+        tracker.record_user_message(query or "", sentiment)
+
+    if sentiment == "positive":
+        state = "LIKELY_RESOLVED"
+        metadata["conversation_state"] = state
+        metadata["unsuccessful_troubleshooting_iterations"] = 0
+        return state, metadata
+
+    if sentiment == "negative":
+        iterations = int(metadata.get("unsuccessful_troubleshooting_iterations", 0) or 0) + 1
+        metadata["unsuccessful_troubleshooting_iterations"] = iterations
+        state = "INVESTIGATING" if iterations < 3 else "WAITING_FOR_USER"
+        metadata["conversation_state"] = state
+        return state, metadata
+
+    metadata["conversation_state"] = state or "ACTIVE"
+    return state, metadata
+
+
+async def _upsert_ai_conversation_record(
+    db: DatabaseSession,
+    conversation_id: str | None,
+    user_id: str | None,
+    status: str | None,
+    *,
+    first_message_at: datetime | None = None,
+    feedback: str | None = None,
+    ticket_id: str | None = None,
+    resolved_by_ai: bool | None = None,
+    escalated: bool | None = None,
+) -> dict:
+    """Persist the canonical AI conversation record and update the same document instead of creating duplicates."""
+    if not conversation_id:
+        return {}
+
+    now = datetime.utcnow()
+    existing = await db["ai_conversations"].find_one({"conversation_id": conversation_id})
+    if existing is None:
+        record = {
+            "conversation_id": conversation_id,
+            "user_id": user_id,
+            "conversation_status": status or "ACTIVE",
+            "started_at": first_message_at or now,
+            "first_message_at": first_message_at or now,
+            "created_at": now,
+            "updated_at": now,
+            "status_history": [{"status": status or "ACTIVE", "timestamp": now}],
+            "feedback": None,
+            "ticket_id": None,
+            "resolved_by_ai": False,
+            "escalated": False,
+        }
+    else:
+        record = dict(existing)
+        if not record.get("user_id") and user_id:
+            record["user_id"] = user_id
+        if record.get("started_at") is None:
+            record["started_at"] = first_message_at or now
+        if record.get("first_message_at") is None:
+            record["first_message_at"] = first_message_at or now
+        if not isinstance(record.get("status_history"), list):
+            record["status_history"] = []
+
+    next_status = status or record.get("conversation_status") or "ACTIVE"
+    if next_status != record.get("conversation_status"):
+        record.setdefault("status_history", []).append({"status": next_status, "timestamp": now})
+        record["conversation_status"] = next_status
+    else:
+        record["conversation_status"] = next_status
+
+    if first_message_at and record.get("first_message_at") is None:
+        record["first_message_at"] = first_message_at
+    if first_message_at and record.get("started_at") is None:
+        record["started_at"] = first_message_at
+
+    if feedback is not None:
+        record["feedback"] = feedback
+        record["feedback_at"] = now
+        if feedback == "positive":
+            record["resolved_by_ai"] = True
+        elif feedback == "negative":
+            record["resolved_by_ai"] = False
+
+    if ticket_id is not None:
+        record["ticket_id"] = ticket_id
+        record["escalated"] = True
+        record["escalated_at"] = now
+
+    if resolved_by_ai is not None:
+        record["resolved_by_ai"] = resolved_by_ai
+    if escalated is not None:
+        record["escalated"] = escalated
+        if escalated and not record.get("escalated_at"):
+            record["escalated_at"] = now
+
+    if next_status == "RESOLVED" and not record.get("resolved_at"):
+        record["resolved_at"] = now
+        record["resolved_by_ai"] = bool(record.get("resolved_by_ai", False)) or next_status == "RESOLVED"
+    if next_status == "ESCALATED" and not record.get("escalated_at"):
+        record["escalated_at"] = now
+        record["escalated"] = True
+
+    if record.get("first_message_at") and record.get("resolved_at"):
+        first_dt = record["first_message_at"]
+        if isinstance(first_dt, datetime):
+            record["resolution_time_seconds"] = max(0, (record["resolved_at"] - first_dt).total_seconds())
+    if record.get("first_message_at") and record.get("escalated_at"):
+        first_dt = record["first_message_at"]
+        if isinstance(first_dt, datetime):
+            record["escalation_time_seconds"] = max(0, (record["escalated_at"] - first_dt).total_seconds())
+
+    record["updated_at"] = now
+    record["user_id"] = user_id or record.get("user_id")
+
+    await db["ai_conversations"].update_one(
+        {"conversation_id": conversation_id},
+        {"$set": record},
+        upsert=True,
+    )
+    return record
+
 
 # ──────────────────────────────────────────────
 # Password-Reset Intent Detection & Flow Helpers
@@ -177,6 +461,9 @@ def _is_password_reset_conversation(state: str | None) -> bool:
 def _make_password_reset_response(
     message: str,
     password_reset_state: str | None = None,
+    *,
+    session_id: str | None = None,
+    satisfaction_card: SatisfactionCard | None = None,
 ) -> ChatResponse:
     """Build a ChatResponse for a password-reset conversation step."""
     return ChatResponse(
@@ -184,8 +471,9 @@ def _make_password_reset_response(
         sources=[],
         confidence=1.0,
         retrieved_documents=0,
-        session_id=None,
+        session_id=session_id,
         suggested_ticket=None,
+        satisfaction_card=satisfaction_card,
     )
 
 
@@ -413,6 +701,23 @@ async def chat(
     settings = get_settings()
     session_id = payload.session_id or str(uuid4())
 
+    tracker = _get_or_create_tracker(session_id)
+
+    conversation_state, conversation_metadata = await _get_conversation_state(db, session_id)
+    conversation_state, conversation_metadata = _update_conversation_metadata(
+        conversation_state,
+        payload.query,
+        conversation_metadata,
+        tracker=tracker,
+    )
+    await _upsert_ai_conversation_record(
+        db,
+        session_id,
+        current_user.get("id"),
+        conversation_state,
+        first_message_at=datetime.utcnow(),
+    )
+
     query_type = _classify_query(payload.query)
     logger.debug("Chat query type=%s query=%r", query_type, payload.query)
 
@@ -426,29 +731,35 @@ async def chat(
             "retrieved_documents": 0,
             "kb_hit": False,
         })
+        # Greetings never trigger the satisfaction card.
         return ChatResponse(
             answer=answer, sources=[], confidence=1.0,
             retrieved_documents=0, session_id=session_id, suggested_ticket=None,
+            satisfaction_card=SatisfactionCard(show=False, reason=None, session_id=session_id),
         )
 
     # All non-greeting queries search the existing KB before response generation.
-    configured_threshold = get_rag_settings().similarity_threshold
+    rag_settings = get_rag_settings()
+    configured_threshold = rag_settings.similarity_threshold
     retrieval_threshold = (
         payload.similarity_threshold
         if payload.similarity_threshold > 0
         else configured_threshold
     )
+    relevance_threshold = rag_settings.relevance_threshold
     try:
         search_service = SearchService(db=db)
         retrieved_context = search_service.search(
             query=payload.query,
             top_k=payload.top_k,
             similarity_threshold=retrieval_threshold,
+            relevance_threshold=relevance_threshold,
         )
         logger.debug(
-            "Chat retrieval query_type=%s threshold=%s scores=%s documents=%s",
+            "Chat retrieval query_type=%s similarity_threshold=%s relevance_threshold=%s scores=%s documents=%s",
             query_type,
             retrieval_threshold,
+            relevance_threshold,
             [round(result.similarity_score, 4) for result in retrieved_context.search_results],
             len(retrieved_context.chunks),
         )
@@ -503,6 +814,7 @@ async def chat(
 
     # The retrieval result above is authoritative for the response path.
     kb_hit = bool(retrieved_context.chunks)
+    updated_metadata = dict(conversation_metadata)
     response_query_type = query_type if kb_hit else "OUT_OF_SCOPE"
     llm_service = None
 
@@ -552,6 +864,44 @@ async def chat(
             response_query_type,
             retrieval_threshold,
         )
+
+    # Record the assistant response and set likely_resolution_provided when:
+    #   - KB hit true (retrieved context used for grounded answer), OR
+    #   - Password-reset completed successfully, OR
+    #   - User already confirmed positive result previously.
+    pw_completed = current_state == "completed"
+    tracker.record_assistant_message(
+        likely_resolution=bool(kb_hit or pw_completed or conversation_state == "LIKELY_RESOLVED")
+    )
+
+    # Satisfaction card is NEVER embedded as plain text in the answer.  It is a
+    # first-class structured component (`satisfaction_card`) in ChatResponse.
+    show_card, reason = _should_show_satisfaction_card(tracker)
+    satisfaction_card: SatisfactionCard | None = None
+    if show_card:
+        tracker.satisfaction_prompt_shown = True
+        satisfaction_card = SatisfactionCard(
+            show=True,
+            reason=reason,
+            session_id=session_id,
+        )
+        updated_metadata["satisfaction_prompt_shown"] = True
+        if reason == "POSITIVE_TREND":
+            conversation_state = "LIKELY_RESOLVED"
+        elif reason == "NEGATIVE_STALL":
+            conversation_state = "WAITING_FOR_USER"
+    else:
+        updated_metadata["satisfaction_prompt_shown"] = tracker.satisfaction_prompt_shown
+
+    updated_metadata["conversation_state"] = conversation_state or "ACTIVE"
+    updated_metadata["tracker_snapshot"] = tracker.model_dump()
+    await _upsert_ai_conversation_record(
+        db,
+        session_id,
+        current_user.get("id"),
+        conversation_state,
+        first_message_at=datetime.utcnow(),
+    )
 
     # Step 5: Prepare sources
     # Fetch all documents in one query for efficiency
@@ -626,6 +976,10 @@ async def chat(
         "sources": [s.model_dump() for s in sources],
         "confidence": confidence,
         "retrieved_documents": len(sources),
+        "conversation_state": conversation_state,
+        "unsuccessful_troubleshooting_iterations": int(updated_metadata.get("unsuccessful_troubleshooting_iterations", 0) or 0),
+        "satisfaction_prompt": bool(updated_metadata.get("satisfaction_prompt", False)),
+        "ticket_prompt": bool(updated_metadata.get("ticket_prompt", False)),
     }
     if suggested_ticket:
         assistant_metadata["suggested_ticket"] = suggested_ticket
@@ -647,7 +1001,37 @@ async def chat(
         retrieved_documents=len(sources),
         session_id=session_id,
         suggested_ticket=suggested_ticket,
+        satisfaction_card=satisfaction_card,
     )
+
+
+@router.post("/feedback")
+async def submit_ai_conversation_feedback(
+    payload: dict,
+    db: DatabaseSession,
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    """Persist AI CSAT feedback and resolution state without creating duplicate analytics records."""
+    session_id = (payload or {}).get("session_id")
+    feedback = (payload or {}).get("feedback")
+    if not session_id or feedback not in {"positive", "negative"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Valid session_id and feedback are required.")
+
+    target_status = "RESOLVED" if feedback == "positive" else "INVESTIGATING"
+    record = await _upsert_ai_conversation_record(
+        db,
+        session_id,
+        current_user.get("id"),
+        target_status,
+        feedback=feedback,
+        resolved_by_ai=(feedback == "positive"),
+    )
+    return {
+        "conversation_id": session_id,
+        "conversation_status": record.get("conversation_status", target_status),
+        "feedback": feedback,
+        "resolved_by_ai": bool(record.get("resolved_by_ai", feedback == "positive")),
+    }
 
 
 @router.post("/escalate-to-ticket", response_model=TicketRead, status_code=status.HTTP_201_CREATED)
@@ -658,6 +1042,18 @@ async def escalate_to_ticket(
 ) -> TicketRead:
     """Escalate a chat session to a support ticket."""
     settings = get_settings()
+
+    existing_record = await db["ai_conversations"].find_one({"conversation_id": payload.session_id})
+    if existing_record and existing_record.get("ticket_id"):
+        existing_ticket = await db["tickets"].find_one({"_id": existing_record["ticket_id"]})
+        if existing_ticket:
+            return await create_ticket(db, TicketCreate(
+                title=existing_ticket.get("title", "Support Request"),
+                description=existing_ticket.get("description", ""),
+                category=existing_ticket.get("category", "General"),
+                priority=TicketPriority(existing_ticket.get("priority", "medium").lower()),
+                ai_summary=existing_ticket.get("ai_summary"),
+            ), reason="Escalated from chat", current_user=current_user)
 
     # Get all chat history for the session
     chat_history_records_cursor = db["chat_history"].find({"session_id": payload.session_id}).sort("created_at")
@@ -721,5 +1117,15 @@ async def escalate_to_ticket(
             {"_id": hist_msg["_id"]},
             {"$set": {"metadata_json": json.dumps(metadata)}}
         )
+
+    await _upsert_ai_conversation_record(
+        db,
+        payload.session_id,
+        current_user.get("id"),
+        "ESCALATED",
+        ticket_id=ticket_id,
+        escalated=True,
+        resolved_by_ai=False,
+    )
 
     return ticket

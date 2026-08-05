@@ -137,13 +137,23 @@ export interface RetrievedDocumentSource {
   chunk_number: number | null;
 }
 
+export interface SatisfactionCard {
+  show: boolean;
+  /** "POSITIVE_TREND" | "NEGATIVE_STALL" | null */
+  reason?: string | null;
+  session_id?: string | null;
+}
+
 export interface ChatResponse {
   answer: string;
+  /** NOTE: Sources + confidence are kept in payload for backwards compatibility,
+   *  but the CHAT UI no longer displays them. They remain in backend logs only. */
   sources: RetrievedDocumentSource[];
   confidence: number;
   retrieved_documents: number;
   session_id: string | null;
   suggested_ticket: any; // Or define GeneratedTicketDetails type if needed
+  satisfaction_card: SatisfactionCard | null;
 }
 
 export interface ChatMessage {

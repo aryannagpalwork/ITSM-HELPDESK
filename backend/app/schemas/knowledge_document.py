@@ -80,13 +80,66 @@ class RetrievedDocumentSource(ORMBase):
     chunk_number: int | None = None
 
 
+class ConversationTracker(ORMBase):
+    """Per-session runtime conversation state used to decide when to show the
+    satisfaction prompt.  Persisted inside the in-memory session registry in
+    chat.py and reset whenever the user clicks "Reset Thread" or opens a new
+    session."""
+    total_user_messages: int = 0
+    total_assistant_messages: int = 0
+    troubleshooting_iterations: int = 0
+    sentiment_history: list[dict] = []  # list of {"role", "sentiment", "message"}
+    likely_resolution_provided: bool = False
+    satisfaction_prompt_shown: bool = False
+
+    def record_user_message(self, message: str, sentiment: str) -> None:
+        self.total_user_messages += 1
+        self.sentiment_history.append({"role": "user", "sentiment": sentiment, "message": message})
+        if sentiment == "negative":
+            self.troubleshooting_iterations += 1
+
+    def record_assistant_message(self, likely_resolution: bool = False) -> None:
+        self.total_assistant_messages += 1
+        if likely_resolution:
+            self.likely_resolution_provided = True
+
+    @property
+    def sentiment_trend(self) -> str:
+        """Return 'positive' | 'negative' | 'neutral' based on the last 3 user messages."""
+        recent = [h for h in self.sentiment_history if h.get("role") == "user"][-3:]
+        if not recent:
+            return "neutral"
+        p = sum(1 for h in recent if h.get("sentiment") == "positive")
+        n = sum(1 for h in recent if h.get("sentiment") == "negative")
+        if p > n:
+            return "positive"
+        if n > p:
+            return "negative"
+        if p == n and p > 0:
+            return "neutral"
+        return "neutral"
+
+
+class SatisfactionCard(ORMBase):
+    """Structured UI component that the backend asks the frontend to render
+    once per thread when the completion conditions are met.  The satisfaction
+    prompt is NEVER embedded as plain text into the answer field."""
+    show: bool = False
+    reason: str | None = None  # "POSITIVE_TREND"  | "NEGATIVE_STALL" | None
+    session_id: str | None = None
+
+
 class ChatResponse(ORMBase):
     answer: str
+    # NOTE: sources / confidence / retrieved_documents are preserved here for
+    # backwards compatibility with existing API consumers, but the frontend
+    # no longer displays them.  Retrieval metadata should stay in backend logs.
     sources: list[RetrievedDocumentSource]
     confidence: float
     retrieved_documents: int
     session_id: str | None = None
     suggested_ticket: dict | None = None
+    satisfaction_card: SatisfactionCard | None = None
 
 
 class EscalateToTicketRequest(ORMBase):

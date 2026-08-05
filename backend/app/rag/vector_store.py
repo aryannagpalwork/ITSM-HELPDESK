@@ -1,5 +1,6 @@
 """Vector store interface for RAG pipeline."""
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -9,6 +10,8 @@ import pickle
 import numpy as np
 
 from app.rag.chunker import DocumentChunk
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -371,25 +374,45 @@ class FAISSVectorStore(VectorStore):
             }, f)
     
     def load(self, path: Optional[Path] = None) -> None:
-        """Load the vector store from disk."""
+        """Load the vector store from disk.
+
+        On dimension mismatch (stored index width != configured embedding width),
+        log a warning and reset the in-memory state to an empty index instead of
+        crashing the caller. The admin can re-upload / re-index documents to
+        rebuild the vector store at the new dimension.
+        """
         load_path = path or self.storage_path
-        
+
         if not (load_path / "faiss.index").exists():
+            logger.info(
+                "No persisted FAISS index found at %s. Initializing empty vector store.",
+                load_path,
+            )
             self.initialize()
             return
-        
+
         try:
-            # Load FAISS index
             import faiss
             self._index = faiss.read_index(str(load_path / "faiss.index"))
 
             if self._index.d != self.dimension:
-                raise VectorStoreError(
-                    "Stored FAISS index dimension does not match the configured "
-                    f"embedding dimension: index={self._index.d}, configured={self.dimension}."
+                logger.warning(
+                    "FAISS index dimension mismatch: stored index=%d, configured=%d. "
+                    "Resetting to empty index — re-upload / re-index the Knowledge Base "
+                    "to rebuild embeddings with the current model.",
+                    self._index.d,
+                    self.dimension,
                 )
-            
-            # Load chunk data
+                # Back up the stale files so an admin can inspect them, then reset.
+                try:
+                    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+                    (load_path / "faiss.index").replace(load_path / f"faiss.index.{ts}.stale")
+                    (load_path / "chunks.pkl").replace(load_path / f"chunks.pkl.{ts}.stale")
+                except OSError:
+                    pass
+                self.initialize()
+                return
+
             with open(load_path / "chunks.pkl", "rb") as f:
                 data = pickle.load(f)
                 self._chunks = data["chunks"]
@@ -397,8 +420,20 @@ class FAISSVectorStore(VectorStore):
                 self._index_to_id = data["index_to_id"]
                 self._doc_to_chunk_ids = data["doc_to_chunk_ids"]
                 self._last_updated = data.get("last_updated")
+
+            logger.info(
+                "Loaded FAISS vector store: chunks=%d, documents=%d, dimension=%d.",
+                len(self._chunks),
+                len(self._doc_to_chunk_ids),
+                self.dimension,
+            )
         except Exception as e:
-            raise VectorStoreError(f"Failed to load FAISS vector store: {str(e)}") from e
+            logger.warning(
+                "Failed to load FAISS vector store from %s: %s. Resetting to empty index.",
+                load_path,
+                str(e),
+            )
+            self.initialize()
 
 
 class VectorStoreFactory:
