@@ -1,6 +1,26 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,100..900;1,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap');
 @import "tailwindcss";
 
+@keyframes hero-ribbon-drift-one {
+  0%, 100% { transform: translate3d(-2%, 1%, 0) scale(1); }
+  50% { transform: translate3d(3%, -2%, 0) scale(1.06); }
+}
+
+@keyframes hero-ribbon-drift-two {
+  0%, 100% { transform: translate3d(2%, -1%, 0) rotate(-1deg); }
+  50% { transform: translate3d(-3%, 2%, 0) rotate(2deg); }
+}
+
+.hero-ribbon { transform-box: fill-box; transform-origin: center; }
+.hero-ribbon-one { animation: hero-ribbon-drift-one 16s ease-in-out infinite; }
+.hero-ribbon-two { animation: hero-ribbon-drift-two 20s ease-in-out infinite; }
+.hero-ribbon-three { animation: hero-ribbon-drift-one 24s ease-in-out infinite reverse; }
+.hero-ribbon-four { animation: hero-ribbon-drift-two 18s ease-in-out infinite reverse; }
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-ribbon { animation: none; }
+}
+
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;

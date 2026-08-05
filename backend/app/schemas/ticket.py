@@ -132,6 +132,7 @@ class TicketRead(ORMBase):
     category: str
     priority: TicketPriority
     status: TicketStatus
+    awaiting_user_response: bool = False
     assigned_to: str | None = None
     assigned_at: datetime | None = None
     assigned_to_name: str | None = None
@@ -163,6 +164,20 @@ class TicketRead(ORMBase):
     sla_breached: bool | None = None
     resolution_duration_hours: float | None = None
     sla_compliant: bool | None = None
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def normalize_legacy_status(cls, value: str | TicketStatus) -> str | TicketStatus:
+        if isinstance(value, str):
+            legacy_statuses = {
+                "awaiting user response": "Open",
+                "awaiting customer response": "Open",
+                "pending": "Open",
+                "new": "Open",
+            }
+            normalized = value.replace("_", " ").strip()
+            return legacy_statuses.get(normalized.lower(), normalized.title())
+        return value
 
 
 class TicketAnalyzeRequest(BaseModel):

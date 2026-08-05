@@ -21,6 +21,28 @@ from app.services.sla import calculate_sla, snapshot_for_ticket
 ACTIVE_TICKET_STATUSES = {"Open", "In Progress"}
 DEFAULT_AGENT_CAPACITY = 10
 
+# Legacy/imported records may use workflow labels that are not part of the
+# public TicketStatus enum. Keep the API contract stable by mapping those
+# labels to the closest supported lifecycle state at serialization time.
+LEGACY_STATUS_ALIASES = {
+    "awaiting user response": "Open",
+    "awaiting customer response": "Open",
+    "pending": "Open",
+    "new": "Open",
+}
+
+
+def normalize_ticket_status(value: object) -> str:
+    raw = str(value or "Open").strip()
+    return LEGACY_STATUS_ALIASES.get(raw.lower(), raw)
+
+
+def is_awaiting_user_response(value: object) -> bool:
+    return str(value or "").strip().lower() in {
+        "awaiting user response",
+        "awaiting customer response",
+    }
+
 # Category vocabulary is intentionally small and explicit. It lets legacy
 # specialization names such as "Infrastructure Specialist" match modern
 # ticket categories such as "Hardware" without changing stored user data.
@@ -343,7 +365,8 @@ async def _serialize_ticket(ticket: dict, db: AsyncIOMotorDatabase) -> TicketRea
         description=ticket["description"],
         category=ticket["category"],
         priority=ticket["priority"],
-        status=ticket["status"],
+        status=normalize_ticket_status(ticket.get("status")),
+        awaiting_user_response=is_awaiting_user_response(ticket.get("status")),
         assigned_to=ticket.get("assigned_to"),
         assigned_at=ticket.get("assigned_at"),
         assigned_to_name=assignee.get("full_name") if assignee else None,

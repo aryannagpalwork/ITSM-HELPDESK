@@ -27,8 +27,11 @@ import {
   ArrowUpRight
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts';
-import { TicketPriority, TicketStatus, AgentMetrics, TimelineRange } from '../../shared/types';
+import { TicketPriority, TicketStatus, AgentMetrics, TimelineRange, TicketLifecycleTimeline } from '../../shared/types';
+import { getAgentTicketTimeline } from '../../shared/api';
 import { RangeToggle } from '../admin/components/RangeToggle';
+import TicketLifecycleDetailChart from '../admin/components/charts/TicketLifecycleDetailChart';
+import { UpcomingActionsStepper } from '../../components/UpcomingActionsStepper';
 
 const getPriorityBadgeStyle = (prio: TicketPriority, tokens: any) => {
   switch (prio) {
@@ -167,6 +170,7 @@ export const AgentDashboard: React.FC = () => {
   // Chart controls: date range + card-driven filter (mirrors the admin dashboard).
   const [range, setRange] = useState<TimelineRange>('7d');
   const [cardFilter, setCardFilter] = useState<AgentCardFilter | null>(null);
+  const [ticketLifecycle, setTicketLifecycle] = useState<TicketLifecycleTimeline | null>(null);
 
   useEffect(() => {
     if (currentUser.role === 'Agent' || currentUser.role === 'Administrator') {
@@ -175,6 +179,16 @@ export const AgentDashboard: React.FC = () => {
       loadTickets({ assignment: 'all' });
     }
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    getAgentTicketTimeline(range).then(data => {
+      if (active) setTicketLifecycle(data);
+    }).catch(() => {
+      if (active) setTicketLifecycle(null);
+    });
+    return () => { active = false; };
+  }, [range]);
 
   // Keep KPI cards live: poll periodically and refresh on window focus so the
   // snapshot stays current without a manual reload.
@@ -468,6 +482,10 @@ export const AgentDashboard: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+        <div className="lg:col-span-2 h-[420px] rounded-2xl p-4" style={{ backgroundColor: tokens.cardBg, border: `1px solid ${tokens.border}` }}>
+          <TicketLifecycleDetailChart data={ticketLifecycle} />
+        </div>
+        {false && (
         <div 
           className="lg:col-span-2 rounded-2xl p-4"
           style={{ backgroundColor: tokens.cardBg, border: `1px solid ${tokens.border}` }}
@@ -504,11 +522,15 @@ export const AgentDashboard: React.FC = () => {
             </ResponsiveContainer>
           </div>
         </div>
+        )}
 
         <div 
           className="rounded-2xl p-4 flex flex-col justify-between"
           style={{ backgroundColor: tokens.cardBg, border: `1px solid ${tokens.border}` }}
         >
+          <UpcomingActionsStepper tickets={tickets.filter(ticket => ticket.agentId === currentUser.id)} />
+          {false && (
+          <>
           <div>
             <h3 className="text-xs font-semibold" style={{ color: tokens.textPrimary }}>Severity Distribution</h3>
             <p className="text-[9px] mb-4" style={{ color: tokens.textTertiary }}>{cardFilter ? `Filtered: ${cardFilter.label}` : 'Tickets by priority level'}</p>
@@ -542,6 +564,8 @@ export const AgentDashboard: React.FC = () => {
               </div>
             ))}
           </div>
+          </>
+          )}
         </div>
       </div>
 

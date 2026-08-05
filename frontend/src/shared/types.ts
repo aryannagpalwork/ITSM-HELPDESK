@@ -29,6 +29,7 @@ export interface Ticket {
   description: string;
   category?: string;
   status: TicketStatus;
+  awaitingCustomerResponse?: boolean;
   priority: TicketPriority;
   userId: string;
   agentId?: string;

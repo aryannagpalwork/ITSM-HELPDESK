@@ -58,6 +58,36 @@ async def get_agent_kpis(
 
 
 @router.get(
+    "/employee/timeline/tickets",
+    response_model=TicketLifecycleTimeline,
+    status_code=status.HTTP_200_OK,
+)
+async def get_employee_ticket_lifecycle_timeline(
+    db: DatabaseSession,
+    range: str = Query(default="7d", description="Time range: today | 7d | 30d"),
+    current_user: dict = Depends(require_roles(["Employee", "end_user", "Agent", "Administrator", "admin"])),
+) -> TicketLifecycleTimeline:
+    """Return lifecycle activity for tickets created by the current user."""
+    r: TimelineRange = "7d" if range not in _ALLOWED_RANGES else range
+    return await get_ticket_lifecycle_timeline(db, r, {"created_by": current_user["id"]})
+
+
+@router.get(
+    "/agent/timeline/tickets",
+    response_model=TicketLifecycleTimeline,
+    status_code=status.HTTP_200_OK,
+)
+async def get_agent_ticket_lifecycle_timeline(
+    db: DatabaseSession,
+    range: str = Query(default="7d", description="Time range: today | 7d | 30d"),
+    current_user: dict = Depends(require_roles(["Agent", "agent", "Administrator", "admin"])),
+) -> TicketLifecycleTimeline:
+    """Return lifecycle activity for tickets assigned to the current agent."""
+    r: TimelineRange = "7d" if range not in _ALLOWED_RANGES else range
+    return await get_ticket_lifecycle_timeline(db, r, {"assigned_to": current_user["id"]})
+
+
+@router.get(
     "/admin",
     response_model=AdminKPIs,
     status_code=status.HTTP_200_OK,

@@ -88,21 +88,7 @@ const TicketLifecycleDetailChart: React.FC<Props> = ({ data }) => {
     const labels = Array.from(map.keys()).sort();
     if (labels.length === 0) return [];
 
-    // The analytics response represents the selected month. Fill any missing
-    // calendar days locally so the chart always spans the complete month.
-    const firstDate = new Date(`${labels[0]}T00:00:00Z`);
-    const lastDate = new Date(`${labels[labels.length - 1]}T00:00:00Z`);
-    if (Number.isNaN(firstDate.getTime()) || Number.isNaN(lastDate.getTime())) {
-      return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
-    }
-    const start = new Date(Date.UTC(firstDate.getUTCFullYear(), firstDate.getUTCMonth(), 1));
-    const end = new Date(Date.UTC(lastDate.getUTCFullYear(), lastDate.getUTCMonth() + 1, 0));
-    const completeMonth: LifecyclePoint[] = [];
-    for (const cursor = new Date(start); cursor <= end; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
-      const label = cursor.toISOString().slice(0, 10);
-      completeMonth.push(map.get(label) || emptyPoint(label));
-    }
-    return completeMonth;
+    return labels.map(label => map.get(label) || emptyPoint(label));
   }, [data]);
 
   const hasData = points.some(point => SERIES.some(series => point[series.key] > 0));

@@ -24,8 +24,10 @@ import {
   Save,
   Loader2
 } from 'lucide-react';
-import { TicketPriority, TicketStatus, TimelineRange } from '../../shared/types';
-import { RangeToggle } from '../admin/components/RangeToggle';
+import { TicketPriority, TicketStatus, TimelineRange, TicketLifecycleTimeline } from '../../shared/types';
+import { getEmployeeTicketTimeline } from '../../shared/api';
+import TicketLifecycleDetailChart from '../admin/components/charts/TicketLifecycleDetailChart';
+import { TicketStatusOverviewStepper } from '../../components/TicketStatusOverviewStepper';
 import {
   Area,
   AreaChart,
@@ -48,6 +50,8 @@ export const EmployeeDashboard: React.FC = () => {
       loadEmployeeKPIs();
     }
   }, []);
+
+  const [ticketLifecycle, setTicketLifecycle] = useState<TicketLifecycleTimeline | null>(null);
   
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
@@ -60,6 +64,15 @@ export const EmployeeDashboard: React.FC = () => {
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [range, setRange] = useState<TimelineRange>('7d');
+  useEffect(() => {
+    let active = true;
+    getEmployeeTicketTimeline(range).then(data => {
+      if (active) setTicketLifecycle(data);
+    }).catch(() => {
+      if (active) setTicketLifecycle(null);
+    });
+    return () => { active = false; };
+  }, [range]);
   const [chartFilter, setChartFilter] = useState<'all' | 'open' | 'resolved'>('all');
   const [resolutionModal, setResolutionModal] = useState<{ title: string; resolution: string } | null>(null);
 
@@ -295,6 +308,7 @@ export const EmployeeDashboard: React.FC = () => {
               <span>Completed</span>
             </div>
           </div>
+          {false && <>
           <div role="button" tabIndex={0} onClick={() => handleKpiFilter('resolved')} onKeyDown={(e) => handleKpiKeyDown(e, 'resolved')} className="min-w-0 p-4 bg-card border border-token rounded-xl cursor-pointer hover-elev focus:outline-none focus-visible:ring-1 focus-visible:ring-accent/50">
             <span className="text-[9px] font-mono uppercase text-tertiary">Mean Time To Resolution </span>
             <h2 className="text-xl font-bold text-accent mt-1">
@@ -315,6 +329,7 @@ export const EmployeeDashboard: React.FC = () => {
               <span>First contact resolution</span>
             </div>
           </div>
+          </>}
           {false && <>
             <div className="p-4 bg-card border border-token rounded-xl">
             <span className="text-[9px] font-mono uppercase text-tertiary">First Response</span>
@@ -432,9 +447,10 @@ export const EmployeeDashboard: React.FC = () => {
             <Activity className="w-3.5 h-3.5 text-accent" />
             <span className="text-[10px] font-mono uppercase tracking-wider text-secondary font-semibold">Analytics &amp; Trends</span>
           </div>
-          <RangeToggle value={range} onChange={setRange} />
         </div>
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          {false && <div className="xl:col-span-2 h-[420px] bg-card border border-token p-5 rounded-2xl min-w-0"><TicketLifecycleDetailChart data={ticketLifecycle} /></div>}
+          {false && (
           <div className="xl:col-span-2 bg-card border border-token p-5 rounded-2xl min-w-0">
             <h3 className="text-sm font-semibold text-primary">Ticket Volume Lifecycle</h3>
             <p className="text-xs text-secondary mt-1">Created vs resolved tickets across the selected period{chartFilter !== 'all' ? ` · Filtered: ${chartFilter}` : ''}</p>
@@ -457,7 +473,11 @@ export const EmployeeDashboard: React.FC = () => {
               </ResponsiveContainer>
             </div>
           </div>
-          <div className="bg-card border border-token p-5 rounded-2xl min-w-0">
+          )}
+          <div className="xl:col-span-3 bg-card border border-token p-5 rounded-2xl min-w-0">
+            <TicketStatusOverviewStepper tickets={myTickets} />
+            {false && (
+            <>
             <h3 className="text-sm font-semibold text-primary">Severity Distribution</h3>
             <p className="text-xs text-secondary mt-1">{chartFilter === 'all' ? 'Your tickets by priority level' : `Filtered: ${chartFilter} tickets`}</p>
             <div className="h-64 mt-4">
@@ -473,6 +493,8 @@ export const EmployeeDashboard: React.FC = () => {
                 </BarChart>
               </ResponsiveContainer>
             </div>
+            </>
+            )}
           </div>
         </div>
       </div>

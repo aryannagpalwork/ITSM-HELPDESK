@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useApp } from '../shared/AppContext';
 import { useTheme } from '../shared/ThemeContext';
 import { Sparkles, ShieldAlert, KeyRound, ArrowRight, UserCircle2 } from 'lucide-react';
+import { AnimatedHeroBackground } from '../components/AnimatedHeroBackground';
 
 export const Login: React.FC = () => {
   const navigate = useNavigate();
@@ -56,7 +57,8 @@ export const Login: React.FC = () => {
   };
 
   return (
-    <div id="login-container" className="min-h-screen font-sans flex items-center justify-center relative p-6" style={{ backgroundColor: 'var(--app-bg)', color: 'var(--text-primary)' }}>
+    <div id="login-container" className="min-h-screen font-sans flex items-center justify-center relative overflow-hidden p-6" style={{ backgroundColor: 'var(--app-bg)', color: 'var(--text-primary)' }}>
+      <AnimatedHeroBackground />
       {/* Background Orbs */}
       <div className="absolute top-1/4 left-1/4 w-[350px] h-[350px] rounded-full blur-[80px] pointer-events-none" style={{ backgroundColor: `${tokens.accentPrimary}1A` }} />
       <div className="absolute bottom-1/4 right-1/4 w-[300px] h-[300px] rounded-full blur-[80px] pointer-events-none" style={{ backgroundColor: `${tokens.accentSecondary}1A` }} />

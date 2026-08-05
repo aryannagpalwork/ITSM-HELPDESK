@@ -20,8 +20,17 @@ import {
 // Use the browser's host by default so the UI also works when opened through
 // localhost, a LAN address, or another development hostname. Set
 // VITE_API_BASE_URL when the API is hosted separately.
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
-  || `${window.location.protocol}//${window.location.hostname || '127.0.0.1'}:8000`;
+const browserHost = window.location.hostname || '127.0.0.1';
+// Windows browsers may resolve `localhost` to IPv6 (::1), while the local
+// Uvicorn server is bound to IPv4. Use the explicit loopback IPv4 address so
+// local API requests do not hang with a browser-level "Failed to fetch".
+const apiHost = browserHost === 'localhost' || browserHost === '::1' || browserHost === '[::1]'
+  ? '127.0.0.1'
+  : browserHost;
+const configuredApiBase = import.meta.env.VITE_API_BASE_URL as string | undefined;
+const API_BASE_URL = configuredApiBase
+  ? configuredApiBase.replace(/(https?:\/\/)(localhost|127\.0\.0\.1|\[::1\]|::1)(?=[:/]|$)/i, (_match, protocol: string) => `${protocol}127.0.0.1`)
+  : `${window.location.protocol}//${apiHost}:8000`;
 const ACCESS_TOKEN_KEY = 'it_copilot_access_token';
 const REFRESH_TOKEN_KEY = 'it_copilot_refresh_token';
 
@@ -108,6 +117,8 @@ const refreshAccessToken = async (): Promise<string> => {
 };
 
 const apiFetch = async (input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> => {
+  const requestUrl = String(input);
+  const requestMethod = init.method || 'GET';
   let response: Response;
   try {
     response = await fetch(input, {
@@ -118,8 +129,14 @@ const apiFetch = async (input: RequestInfo | URL, init: RequestInit = {}): Promi
       },
     });
   } catch (error) {
+    console.error('[API] Network request failed', {
+      url: requestUrl,
+      method: requestMethod,
+      error,
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     const detail = error instanceof TypeError
-      ? 'Unable to reach the API. Check that the backend is running and that its CORS origins include this frontend URL.'
+      ? `Unable to reach the API at ${requestUrl}. Check the backend process, port, and CORS origins.`
       : 'Network request failed.';
     throw new Error(detail, { cause: error });
   }
@@ -161,6 +178,27 @@ const apiFetch = async (input: RequestInfo | URL, init: RequestInit = {}): Promi
     }
   }
 
+  if (!response.ok) {
+    const responseHeaders = Object.fromEntries(response.headers.entries());
+    response.clone().text().then(body => {
+      console.error('[API] HTTP request failed', {
+        url: requestUrl,
+        method: requestMethod,
+        status: response.status,
+        headers: responseHeaders,
+        body,
+      });
+    }).catch(error => {
+      console.error('[API] Failed to read error response body', {
+        url: requestUrl,
+        method: requestMethod,
+        status: response.status,
+        headers: responseHeaders,
+        error,
+      });
+    });
+  }
+
   return response;
 };
 
@@ -183,6 +221,7 @@ interface BackendTicket {
   category: string;
   priority: 'Low' | 'Medium' | 'High' | 'Critical';
   status: 'Open' | 'In Progress' | 'Resolved' | 'Closed';
+  awaiting_user_response?: boolean;
   assigned_to?: string;
   assigned_to_name?: string;
   assigned_team?: string;
@@ -378,7 +417,7 @@ const statusToFrontend = (status: BackendTicket['status']): TicketStatus => {
     Resolved: 'resolved',
     Closed: 'closed',
   };
-  return map[status];
+  return map[status] || 'open';
 };
 
 const priorityToFrontend = (priority: BackendTicket['priority']): TicketPriority => {
@@ -691,6 +730,7 @@ export const mapTicket = (ticket: BackendTicket): Ticket => ({
   description: ticket.description,
   category: ticket.category,
   status: statusToFrontend(ticket.status),
+  awaitingCustomerResponse: ticket.awaiting_user_response === true,
   priority: priorityToFrontend(ticket.priority),
   userId: ticket.created_by || '',
   agentId: ticket.assigned_to || undefined,
@@ -1138,6 +1178,18 @@ export const getAdminTicketTimeline = async (range: TimelineRange): Promise<Tick
   if (!response.ok) {
     throw new Error(`Unable to fetch ticket timeline: ${response.status}`);
   }
+  return await response.json();
+};
+
+export const getEmployeeTicketTimeline = async (range: TimelineRange): Promise<TicketLifecycleTimeline> => {
+  const response = await apiFetch(`${API_BASE_URL}/kpi/employee/timeline/tickets?range=${range}`);
+  if (!response.ok) throw new Error(`Unable to fetch employee ticket timeline: ${response.status}`);
+  return await response.json();
+};
+
+export const getAgentTicketTimeline = async (range: TimelineRange): Promise<TicketLifecycleTimeline> => {
+  const response = await apiFetch(`${API_BASE_URL}/kpi/agent/timeline/tickets?range=${range}`);
+  if (!response.ok) throw new Error(`Unable to fetch agent ticket timeline: ${response.status}`);
   return await response.json();
 };
 

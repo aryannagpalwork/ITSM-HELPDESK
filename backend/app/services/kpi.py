@@ -109,11 +109,35 @@ async def _get_first_response_map(
         {"_id": {"$in": ticket_ids}, "comments": {"$exists": True, "$ne": []}},
         {"_id": 1, "comments": 1}
     )
-    ticket_comment_map: dict[str, list[str]] = {}
+    ticket_comment_map: dict[str, list[Any]] = {}
     async for t in comment_ids_cursor:
         if t.get("comments"):
             ticket_comment_map[t["_id"]] = t["comments"]
 
+    # Comments are normally stored as ID strings, but some legacy/imported
+    # tickets contain embedded references such as {"_id": "..."} or
+    # {"id": "..."}. Never put the raw reference into a set: dictionaries
+    # are unhashable and caused admin KPI calculation to fail with a 500.
+    def normalize_comment_id(reference: Any) -> Any | None:
+        if isinstance(reference, dict):
+            reference = reference.get("_id", reference.get("id"))
+        if reference is None:
+            return None
+        try:
+            hash(reference)
+        except TypeError:
+            return None
+        return reference
+
+    normalized_map: dict[str, list[Any]] = {}
+    for ticket_id, references in ticket_comment_map.items():
+        normalized_map[ticket_id] = [
+            comment_id
+            for reference in references
+            if (comment_id := normalize_comment_id(reference)) is not None
+        ]
+
+    ticket_comment_map = normalized_map
     all_comment_ids = list({cid for ids in ticket_comment_map.values() for cid in ids})
     if not all_comment_ids:
         return {}
@@ -537,7 +561,7 @@ def _bucket_to_points(counts: Dict[str, int], keys: List[str]) -> List[Dict[str,
 
 
 async def get_ticket_lifecycle_timeline(
-    db: AsyncIOMotorDatabase, r: TimelineRange
+    db: AsyncIOMotorDatabase, r: TimelineRange, ticket_filter: Optional[Dict[str, Any]] = None
 ) -> TicketLifecycleTimeline:
     now = datetime.utcnow()
     days = _range_to_days(r)
@@ -546,11 +570,23 @@ async def get_ticket_lifecycle_timeline(
     else:
         start = datetime(now.year, now.month, now.day) - timedelta(days=days - 1)
 
-    tickets = await db.tickets.find({"created_at": {"$gte": start}}).to_list(length=None)
+    if ticket_filter:
+        query = {
+            "$and": [
+                ticket_filter,
+                {"$or": [{"created_at": {"$gte": start}}, {"updated_at": {"$gte": start}}]},
+            ]
+        }
+    else:
+        query = {"created_at": {"$gte": start}}
+    tickets = await db.tickets.find(query).to_list(length=None)
 
     keys = _build_bucket_keys(r, now)
     created_counts: Dict[str, int] = {k: 0 for k in keys}
     resolved_counts: Dict[str, int] = {k: 0 for k in keys}
+    ai_resolved_counts: Dict[str, int] = {k: 0 for k in keys}
+    agent_resolved_counts: Dict[str, int] = {k: 0 for k in keys}
+    in_progress_counts: Dict[str, int] = {k: 0 for k in keys}
 
     for t in tickets:
         cat = t.get("created_at")
@@ -558,16 +594,32 @@ async def get_ticket_lifecycle_timeline(
             b = _date_bucket(r, cat)
             if b in created_counts:
                 created_counts[b] += 1
-        if t["status"] in ("Resolved", "Closed"):
+        if t.get("status") == "In Progress" and isinstance(cat, datetime):
+            b = _date_bucket(r, cat)
+            if b in in_progress_counts:
+                in_progress_counts[b] += 1
+        if t.get("status") in ("Resolved", "Closed"):
             uat = t.get("updated_at")
             if isinstance(uat, datetime) and uat >= start:
                 b = _date_bucket(r, uat)
                 if b in resolved_counts:
                     resolved_counts[b] += 1
+                    resolved_by_ai = (
+                        str(t.get("resolved_by") or "").lower() == "ai"
+                        or str(t.get("resolution_source") or "").lower() == "ai"
+                        or t.get("ai_resolved") is True
+                    )
+                    if resolved_by_ai:
+                        ai_resolved_counts[b] += 1
+                    elif t.get("resolved_by") or t.get("assigned_to"):
+                        agent_resolved_counts[b] += 1
 
     return TicketLifecycleTimeline(
         created=_bucket_to_points(created_counts, keys),
         resolved=_bucket_to_points(resolved_counts, keys),
+        aiResolved=_bucket_to_points(ai_resolved_counts, keys),
+        agentResolved=_bucket_to_points(agent_resolved_counts, keys),
+        inProgress=_bucket_to_points(in_progress_counts, keys),
     )
 
 

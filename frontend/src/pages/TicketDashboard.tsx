@@ -37,6 +37,31 @@ export const TicketDashboard: React.FC = () => {
   const [priorityFilter, setPriorityFilter] = useState<string>(() => searchParams.get('priority') ?? 'all');
   const [slaFilter] = useState<string>(() => searchParams.get('sla') ?? 'all');
   const [sortBy, setSortBy] = useState<string>('newest');
+  const ticketView = searchParams.get('view') ?? 'all';
+
+  const isSameDay = (value?: string) => {
+    if (!value) return false;
+    const date = new Date(value);
+    const today = new Date();
+    return !Number.isNaN(date.getTime()) && date.getFullYear() === today.getFullYear()
+      && date.getMonth() === today.getMonth() && date.getDate() === today.getDate();
+  };
+
+  const isBreached = (ticket: typeof tickets[number]) => {
+    if (ticket.slaBreached === true || ticket.slaStatus === 'Breached') return true;
+    if (typeof ticket.slaRemainingHours === 'number' && ticket.slaRemainingHours <= 0) return true;
+    if (!ticket.slaDueAt) return false;
+    const dueAt = new Date(ticket.slaDueAt).getTime();
+    return !Number.isNaN(dueAt) && dueAt <= Date.now();
+  };
+
+  // Keep the visible controls in sync when a dashboard stepper changes only
+  // the URL while this queue page is already mounted.
+  useEffect(() => {
+    setSearch(searchParams.get('search') ?? '');
+    setStatusFilter(searchParams.get('status') ?? 'all');
+    setPriorityFilter(searchParams.get('priority') ?? 'all');
+  }, [searchParams]);
 
   // New Request Form State (within dashboard)
   const [isOpen, setIsOpen] = useState(false);
@@ -47,11 +72,14 @@ export const TicketDashboard: React.FC = () => {
   useEffect(() => {
     loadTickets({
       search,
-      status: statusFilter,
+      // The completed overview includes both Resolved and Closed tickets,
+      // matching the KPI cards. Load the full queue for that view so Closed
+      // records are not removed by the API status filter.
+      status: ticketView === 'resolved' ? 'all' : statusFilter,
       priority: priorityFilter,
       sortBy,
     });
-  }, [search, statusFilter, priorityFilter, sortBy]);
+  }, [search, statusFilter, priorityFilter, sortBy, ticketView]);
 
   // Filter logic
   const filteredTickets = tickets.filter(ticket => {
@@ -74,6 +102,28 @@ export const TicketDashboard: React.FC = () => {
     // Priority filter match
     const matchesPriority = priorityFilter === 'all' || ticket.priority === priorityFilter;
 
+    const ticketText = `${ticket.title} ${ticket.description} ${ticket.category || ''}`.toLowerCase();
+    const awaitingResponse = ticket.awaitingCustomerResponse === true
+      || /customer|response|reply|wait(?:ing|ed)|detail required|information needed|input needed/.test(ticketText);
+    const matchesView = (() => {
+      if (ticketView === 'awaiting-response') {
+        return (ticket.status === 'open' || ticket.status === 'in_progress') && awaitingResponse;
+      }
+      if (ticketView === 'submitted') {
+        return ticket.status === 'open' && !awaitingResponse;
+      }
+      if (ticketView === 'assigned-open') {
+        return ticket.status === 'open' || ticket.status === 'in_progress';
+      }
+      if (ticketView === 'sla-due-today') {
+        return isSameDay(ticket.slaDueAt) && isBreached(ticket);
+      }
+      if (ticketView === 'resolved') {
+        return ticket.status === 'resolved' || ticket.status === 'closed';
+      }
+      return true;
+    })();
+
     const matchesSla = (() => {
       if (slaFilter === 'all') return true;
       if (slaFilter === 'resolved') return ticket.status === 'resolved' || ticket.status === 'closed';
@@ -84,7 +134,7 @@ export const TicketDashboard: React.FC = () => {
       return true;
     })();
 
-    return matchesSearch && matchesStatus && matchesPriority && matchesSla;
+    return matchesSearch && matchesStatus && matchesPriority && matchesSla && matchesView;
   });
 
   // Sort logic
