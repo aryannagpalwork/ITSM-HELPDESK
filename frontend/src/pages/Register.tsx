@@ -29,10 +29,11 @@ export const Register: React.FC = () => {
     setSuccess('');
     
     try {
-      await register(fullName, email, password, role);
-      setSuccess('Account created successfully! Redirecting to login...');
+      const response = await register(fullName, email, password, role);
+      const acknowledgement = response.message || 'Your account request was delivered to the administrator and is now queued for approval. You can sign in after approval.';
+      setSuccess(`${acknowledgement} Redirecting to login...`);
       setTimeout(() => {
-        navigate('/login');
+        navigate('/login', { state: { notice: acknowledgement }, replace: true });
       }, 1000);
     } catch (err) {
       setError((err as Error).message || 'Registration failed');

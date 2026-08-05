@@ -8,7 +8,6 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.api.deps import DatabaseSession
 from app.auth.security import create_token, decode_token, verify_password, hash_password
-from app.auth.dependencies import require_roles
 from app.auth.dependencies import get_current_user
 from app.config.settings import get_settings
 from app.schemas.auth import (
@@ -80,7 +79,7 @@ def _build_token_response(user: dict) -> TokenResponse:
     )
 
 
-@router.post("/register", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_roles(["admin"]))])
+@router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register(payload: RegisterRequest, db: DatabaseSession) -> dict:
     # Normalize inputs
     email = payload.email.lower().strip()
@@ -126,7 +125,7 @@ async def register(payload: RegisterRequest, db: DatabaseSession) -> dict:
     
     await db.users.insert_one(new_user)
     
-    return {"detail": "Account created successfully. Please wait for admin approval."}
+    return {"detail": "Your registration request was delivered to the administrator and is now queued for approval. You can sign in after approval."}
 
 
 @router.post("/login", response_model=TokenResponse)

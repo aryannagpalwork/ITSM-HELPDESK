@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useApp } from '../shared/AppContext';
 import { useTheme } from '../shared/ThemeContext';
-import { Sparkles, ShieldAlert, KeyRound, ArrowRight, UserCircle2 } from 'lucide-react';
+import { Sparkles, ShieldAlert, KeyRound, ArrowRight, UserCircle2, CheckCircle2 } from 'lucide-react';
 import { AnimatedHeroBackground } from '../components/AnimatedHeroBackground';
 
 export const Login: React.FC = () => {
@@ -13,6 +13,7 @@ export const Login: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState(() => (location.state as { notice?: string } | null)?.notice || '');
   const [isLoading, setIsLoading] = useState(false);
 
   const from = location.state?.from?.pathname || '/dashboard';
@@ -37,6 +38,7 @@ export const Login: React.FC = () => {
     
     setIsLoading(true);
     setError('');
+    setNotice('');
     
     try {
       await login(email, password);
@@ -50,7 +52,10 @@ export const Login: React.FC = () => {
         navigate(from, { replace: true });
       }
     } catch (err) {
-      setError((err as Error).message || 'Invalid email or password');
+      const message = (err as Error).message || 'Invalid email or password';
+      setError(message === 'Account pending admin approval.'
+        ? 'Your account was created successfully but is still awaiting administrator approval. Please try again after approval.'
+        : message);
     } finally {
       setIsLoading(false);
     }
@@ -75,6 +80,12 @@ export const Login: React.FC = () => {
 
         {/* Login Form */}
         <form onSubmit={handleLogin} className="space-y-4">
+          {notice && (
+            <div className="p-3 rounded-lg flex items-start space-x-2.5 text-xs" style={{ backgroundColor: 'var(--status-success-bg)', border: '1px solid var(--status-success)', color: 'var(--status-success)' }}>
+              <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{notice}</span>
+            </div>
+          )}
           {error && (
             <div className="p-3 rounded-lg flex items-start space-x-2.5 text-xs" style={{ backgroundColor: 'var(--status-error-bg)', border: '1px solid var(--status-error)', color: 'var(--status-error)' }}>
               <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />

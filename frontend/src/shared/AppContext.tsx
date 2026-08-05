@@ -24,7 +24,7 @@ interface AppContextType {
   ticketsLoading: boolean;
   ticketsError: string | null;
   login: (email: string, password: string) => Promise<void>;
-  register: (fullName: string, email: string, password: string, role: string) => Promise<void>;
+  register: (fullName: string, email: string, password: string, role: string) => Promise<{ message: string }>;
   logout: () => Promise<void>;
   switchRole: (role: UserRole) => void;
   resetAllData: () => void;
@@ -85,10 +85,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [kpisLoading, setKpisLoading] = useState(false);
   const [kpisError, setKpisError] = useState<string | null>(null);
 
-  const register = async (fullName: string, email: string, password: string, role: string) => {
+  const register = async (fullName: string, email: string, password: string, role: string): Promise<{ message: string }> => {
     // Just register, don't log in automatically
     // Registration returns a message, not tokens — avoids overwriting admin session
-    await ticketApi.register(fullName, email, password, role);
+    return ticketApi.register(fullName, email, password, role);
   };
 
   const login = async (email: string, password: string) => {
@@ -407,6 +407,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const createUser = async (fullName: string, email: string, role: string, department?: string, password?: string): Promise<string> => {
     try {
       const generatedPassword = await ticketApi.createUser(fullName, email, role, department, password);
+      // A newly created account starts in PENDING status. Refresh both user
+      // collections so the admin dashboard badge updates immediately.
+      await loadPendingUsers();
       await loadAllUsers();
       return generatedPassword;
     } catch (error) {
@@ -451,6 +454,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (isAuthenticated && currentUser.role === 'Administrator') {
       loadPendingUsers();
       loadAllUsers();
+      const refreshTimer = window.setInterval(() => {
+        loadPendingUsers();
+        loadAllUsers();
+      }, 15000);
+      return () => window.clearInterval(refreshTimer);
     }
   }, [isAuthenticated, currentUser.role]);
 

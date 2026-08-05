@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 
 export const Settings: React.FC = () => {
-  const { currentUser, resetAllData, switchRole } = useApp();
+  const { currentUser, resetAllData } = useApp();
 
   const handleReset = () => {
     if (confirm('Are you absolutely sure you want to delete all newly created tickets, comments, knowledge articles, and restore initial factory mockups?')) {
@@ -81,9 +81,8 @@ export const Settings: React.FC = () => {
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <button 
-                onClick={() => switchRole('Employee')}
-                className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
+              <div
+                className={`p-4 rounded-xl border text-left ${
                   currentUser.role === 'Employee' 
                     ? 'bg-accent-soft border-token-strong' 
                     : 'bg-card-solid border-token hover-border'
@@ -91,11 +90,10 @@ export const Settings: React.FC = () => {
               >
                 <span className="block text-xs font-bold text-primary">Employee Persona</span>
                 <span className="block text-[10px] text-tertiary mt-1">Create requests, search knowledge articles, chat with AI Copilot.</span>
-              </button>
+              </div>
 
-              <button 
-                onClick={() => switchRole('Agent')}
-                className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
+              <div
+                className={`p-4 rounded-xl border text-left ${
                   currentUser.role === 'Agent' 
                     ? 'bg-accent-soft border-token-strong' 
                     : 'bg-card-solid border-token hover-border'
@@ -103,11 +101,10 @@ export const Settings: React.FC = () => {
               >
                 <span className="block text-xs font-bold text-primary">IT Support Agent</span>
                 <span className="block text-[10px] text-tertiary mt-1">Review assigned incidents, reassign tickets, and post internal notes.</span>
-              </button>
+              </div>
 
-              <button 
-                onClick={() => switchRole('Administrator')}
-                className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
+              <div
+                className={`p-4 rounded-xl border text-left ${
                   currentUser.role === 'Administrator' 
                     ? 'bg-accent-soft border-token-strong' 
                     : 'bg-card-solid border-token hover-border'
@@ -115,7 +112,7 @@ export const Settings: React.FC = () => {
               >
                 <span className="block text-xs font-bold text-primary">System Administrator</span>
                 <span className="block text-[10px] text-tertiary mt-1">Full supervisor oversight, delete incident records, review security statistics.</span>
-              </button>
+              </div>
             </div>
           </div>
 

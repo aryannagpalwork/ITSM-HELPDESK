@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useApp } from '../../shared/AppContext';
 import { 
@@ -15,7 +15,6 @@ export const EmployeeSidebar: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { currentUser, logout } = useApp();
-  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
 
   const handleNavigation = (path: string) => {
     navigate(path);
@@ -150,50 +149,11 @@ export const EmployeeSidebar: React.FC = () => {
         {/* Horizontal line placed just above the user profile area */}
         <div style={{ borderTop: '1px solid var(--border)' }} className="w-full mb-4"></div>
 
-        <div className="relative">
-          {/* Extended Menu - positioned above the line */}
-            {profileMenuOpen && (
-              <div
-                className="absolute left-0 right-0 rounded-xl border overflow-hidden shadow-2xl"
-                style={{
-                  backgroundColor: 'var(--card-bg)',
-                  borderColor: 'var(--border)',
-                bottom: 'calc(100% + 24px)', // Positions menu clearly above the line
-                }}
-              >
-              <button
-                type="button"
-                onClick={() => {
-                  setProfileMenuOpen(false);
-                  navigate('/change-password');
-                }}
-                className="w-full flex items-center gap-2 px-3 py-2.5 text-xs font-medium transition-colors"
-                style={{ color: 'var(--text-primary)' }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--sidebar-hover)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                }}
-              >
-                <KeyRound className="w-3.5 h-3.5" style={{ color: 'var(--accent-primary)' }} />
-                <span>Change password</span>
-              </button>
-            </div>
-          )}
-
-          {/* User Button */}
-          <button
-            type="button"
-            onClick={() => setProfileMenuOpen(prev => !prev)}
-            className="w-full flex items-center justify-between gap-2 p-1.5 rounded-lg transition-colors"
+        <div>
+          {/* User profile */}
+          <div
+            className="w-full flex items-center justify-between gap-2 p-1.5 rounded-lg"
             style={{ backgroundColor: 'transparent' }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--sidebar-hover)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-            }}
           >
             <div className="flex items-center space-x-3 min-w-0 flex-1">
               <div className="relative shrink-0">
@@ -227,8 +187,19 @@ export const EmployeeSidebar: React.FC = () => {
                 </p>
               </div>
             </div>
-          </button>
+          </div>
         </div>
+        <button
+          type="button"
+          onClick={() => navigate('/change-password')}
+          className="w-full flex items-center gap-2 px-3 py-2.5 mt-3 mb-1 text-xs font-medium rounded-lg transition-colors"
+          style={{ color: 'var(--text-secondary)' }}
+          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--sidebar-hover)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+        >
+          <KeyRound className="w-3.5 h-3.5" style={{ color: 'var(--accent-primary)' }} />
+          <span>Change password</span>
+        </button>
         <button
           type="button"
           onClick={() => { logout(); navigate('/'); }}
