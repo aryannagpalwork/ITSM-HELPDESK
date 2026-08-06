@@ -224,11 +224,15 @@ interface BackendTicket {
   awaiting_user_response?: boolean;
   assigned_to?: string;
   assigned_to_name?: string;
+  assignment_type?: string;
   assigned_team?: string;
   created_by?: string;
   created_by_name?: string;
   ai_summary?: string;
   resolution?: string;
+  resolved_by?: string;
+  resolution_source?: string;
+  ai_resolved?: boolean;
   ai_analysis_category?: string;
   ai_analysis_priority?: string;
   ai_analysis_department?: string;
@@ -737,12 +741,15 @@ export const mapTicket = (ticket: BackendTicket): Ticket => ({
   aiSummary: ticket.ai_summary || undefined,
   suggestedResolution: ticket.resolution || undefined,
   resolution: ticket.resolution || undefined,
+  resolvedBy: ticket.resolved_by || undefined,
+  resolutionSource: ticket.resolution_source || undefined,
+  aiResolved: ticket.ai_resolved === true,
   createdAt: ticket.created_at,
   // Keep legacy tickets visible even when the backend document predates the
   // updated_at field migration.
   updatedAt: ticket.updated_at || ticket.created_at,
   userName: ticket.created_by_name || 'Unassigned requester',
-  agentName: ticket.assigned_to_name || undefined,
+  agentName: ticket.assigned_to_name || (ticket.assignment_type === 'AI' ? 'AI Copilot' : undefined),
   departmentName: ticket.category,
   
   // AI Analysis fields
@@ -1144,7 +1151,7 @@ export const escalateToTicket = async (sessionId: string, userFeedback?: string)
 export const submitAIChatFeedback = async (
   sessionId: string,
   feedback: 'positive' | 'negative'
-): Promise<{ conversation_id: string; feedback: 'positive' | 'negative'; resolved_by_ai: boolean }> => {
+): Promise<{ conversation_id: string; feedback: 'positive' | 'negative'; resolved_by_ai: boolean; ticket_id?: string | null; ticket_number?: string | null }> => {
   const response = await apiFetch(`${API_BASE_URL}/chat/feedback`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

@@ -95,7 +95,9 @@ export const Login: React.FC = () => {
 
           <div>
             <label className="block text-[11px] font-mono uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Corporate Email</label>
-            <input 
+            <input
+              id="login-email"
+              name="email"
               type="email" 
               placeholder="name@company.com"
               value={email}
@@ -111,8 +113,10 @@ export const Login: React.FC = () => {
           <div>
             <label className="block text-[11px] font-mono uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Password</label>
             <div className="relative">
-              <input 
-                type="password" 
+            <input
+              id="login-password"
+              name="password"
+              type="password"
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}

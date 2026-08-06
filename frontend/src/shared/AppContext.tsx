@@ -28,7 +28,7 @@ interface AppContextType {
   logout: () => Promise<void>;
   switchRole: (role: UserRole) => void;
   resetAllData: () => void;
-  loadTickets: (query?: ticketApi.TicketQuery) => Promise<void>;
+  loadTickets: (query?: ticketApi.TicketQuery) => Promise<Ticket[]>;
   loadTicketAuditLogs: (ticketId: string) => Promise<AuditLog[]>;
   loadAgentMetrics: () => Promise<void>;
   loadEmployeeKPIs: () => Promise<void>;
@@ -132,17 +132,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setKbArticles(MOCK_KB_ARTICLES);
   };
 
-  const loadTickets = async (query: ticketApi.TicketQuery = {}) => {
+  const loadTickets = async (query: ticketApi.TicketQuery = {}): Promise<Ticket[]> => {
     try {
       setTicketsLoading(true);
       setTicketsError(null);
       const response = await ticketApi.listTickets(query);
       setTickets(response.tickets);
       setComments(response.comments);
+      return response.tickets;
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Unable to load tickets';
       console.warn('Unable to load tickets from API.', error);
       setTicketsError(msg);
+      return [];
     } finally {
       setTicketsLoading(false);
     }

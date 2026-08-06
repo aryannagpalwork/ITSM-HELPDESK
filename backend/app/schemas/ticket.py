@@ -144,6 +144,9 @@ class TicketRead(ORMBase):
     created_by_name: str | None = None
     ai_summary: str | None = None
     resolution: str | None = None
+    resolved_by: str | None = None
+    resolution_source: str | None = None
+    ai_resolved: bool = False
     created_at: datetime
     updated_at: datetime
     comments: list[TicketCommentRead] = Field(default_factory=list)

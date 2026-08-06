@@ -39,11 +39,15 @@ export const AIChat: React.FC = () => {
     description: string;
     priority: TicketPriority;
     show: boolean;
+    resolvedByAI?: boolean;
+    ticketId?: string;
   } | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [collapsedMessages, setCollapsedMessages] = useState<Record<string, boolean>>({});
   const [activeSatisfactionCard, setActiveSatisfactionCard] = useState<SatisfactionCard | null>(null);
   const [conversationStatus, setConversationStatus] = useState<'ACTIVE' | 'INVESTIGATING' | 'WAITING_FOR_USER' | 'LIKELY_RESOLVED' | 'ESCALATED' | 'RESOLVED'>('ACTIVE');
+  const [guidedActions, setGuidedActions] = useState<string[]>([]);
+  const [guidedState, setGuidedState] = useState<string | null>(null);
 
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -107,7 +111,6 @@ export const AIChat: React.FC = () => {
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setIsTyping(true);
-    setSuggestedTicket(null);
 
     try {
       const chatHistory = messages.map(msg => ({
@@ -124,10 +127,16 @@ export const AIChat: React.FC = () => {
       });
 
       setSessionId(response.session_id);
+      if (response.guided_state === 'RESOLVED') {
+        await loadTickets();
+      }
 
       // Satisfaction is now driven by the backend conversation tracker, NOT
       // by searching the answer for plain-text prompts.
-      if (response.satisfaction_card?.show && !activeSatisfactionCard) {
+      setGuidedActions(response.guided_actions || []);
+      setGuidedState(response.guided_state || null);
+
+      if (!response.guided_state && response.satisfaction_card?.show && !activeSatisfactionCard) {
         setActiveSatisfactionCard(response.satisfaction_card);
         if (response.satisfaction_card.reason === 'POSITIVE_TREND') {
           setConversationStatus('LIKELY_RESOLVED');
@@ -143,7 +152,20 @@ export const AIChat: React.FC = () => {
           title: response.suggested_ticket.title || 'Support Request',
           description: response.suggested_ticket.description || textToSend,
           priority: (response.suggested_ticket.priority?.toLowerCase() || 'medium') as TicketPriority,
-          show: true
+          show: true,
+          ticketId: response.ticket_id || undefined,
+        });
+      } else if (response.ticket_id) {
+        setSuggestedTicket(previous => previous ? { ...previous, ticketId: response.ticket_id } : previous);
+      } else if (response.guided_state && response.guided_state !== 'RESOLVED' && response.guided_state !== 'NO_SOLUTION') {
+        // Keep a non-submitted draft visible throughout the Copilot session.
+        // This is only sidebar state; the existing File Support Incident action
+        // remains the sole path that creates a human ticket.
+        setSuggestedTicket(previous => previous || {
+          title: textToSend.length > 80 ? `${textToSend.slice(0, 77)}...` : textToSend,
+          description: textToSend,
+          priority: 'medium',
+          show: true,
         });
       }
     } catch (error) {
@@ -157,6 +179,44 @@ export const AIChat: React.FC = () => {
       setMessages(prev => [...prev, errorMsg]);
       setIsTyping(false);
     }
+  };
+
+  const handleGuidedYes = async () => {
+    if (!sessionId || isFeedbackLoading) return;
+    setIsFeedbackLoading(true);
+    try {
+      const feedbackResult = await submitAIChatFeedback(sessionId, 'positive');
+      const refreshedTickets = await loadTickets();
+      const refreshedAITicket = refreshedTickets.find(ticket => ticket.aiResolved === true);
+      setConversationStatus('RESOLVED');
+      setGuidedActions([]);
+      setGuidedState('RESOLVED');
+      setSuggestedTicket(prev => ({
+        ...(prev || {
+          title: 'AI Resolved Support Request',
+          description: 'Issue resolved by AI Copilot.',
+          priority: 'medium' as TicketPriority,
+        }),
+        show: true,
+        resolvedByAI: true,
+        ticketId: feedbackResult.ticket_id || prev?.ticketId || refreshedAITicket?.id,
+      }));
+      setMessages(prev => [...prev, {
+        id: `resolved_${Date.now()}`,
+        sender: 'assistant',
+        text: 'Thanks for confirming. Your issue has been marked as Resolved by AI.',
+        timestamp: new Date().toISOString(),
+      }]);
+    } catch (error) {
+      console.error('[Guided Resolution] Failed:', error);
+    } finally {
+      setIsFeedbackLoading(false);
+    }
+  };
+
+  const handleGuidedNo = () => {
+    setActiveSatisfactionCard(null);
+    handleSendPrompt('No');
   };
 
   const [isEscalating, setIsEscalating] = useState(false);
@@ -211,7 +271,10 @@ export const AIChat: React.FC = () => {
     setIsFeedbackLoading(true);
     try {
       if (sid) {
-        await submitAIChatFeedback(sid, 'positive');
+        const feedbackResult = await submitAIChatFeedback(sid, 'positive');
+        const refreshedTickets = await loadTickets();
+        const refreshedAITicket = refreshedTickets.find(ticket => ticket.aiResolved === true);
+        setSuggestedTicket(prev => prev ? { ...prev, show: true, resolvedByAI: true, ticketId: feedbackResult.ticket_id || prev.ticketId || refreshedAITicket?.id } : prev);
       }
       setConversationStatus('RESOLVED');
       setActiveSatisfactionCard(null);
@@ -284,7 +347,7 @@ export const AIChat: React.FC = () => {
   };
 
   const renderSatisfactionCard = () => {
-    if (!activeSatisfactionCard?.show) return null;
+    if (!activeSatisfactionCard?.show || guidedActions.length > 0 || guidedState === 'NO_SOLUTION') return null;
     const isPositive = activeSatisfactionCard.reason === 'POSITIVE_TREND';
     const title = isPositive
       ? 'Glad that helped — was your issue fully resolved?'
@@ -358,6 +421,34 @@ export const AIChat: React.FC = () => {
     );
   };
 
+  const renderGuidedActions = () => {
+    if (guidedActions.length < 2 || guidedState === 'RESOLVED' || guidedState === 'NO_SOLUTION') return null;
+    return (
+      <div className="flex justify-center mt-2">
+        <div className="max-w-xl w-full flex gap-2">
+          <button
+            disabled={isFeedbackLoading || isTyping}
+            onClick={handleGuidedYes}
+            className="flex-1 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 border transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ backgroundColor: tokens.statusSuccessBg, color: tokens.statusSuccess, borderColor: `${tokens.statusSuccess}55` }}
+          >
+            <span className="w-4 h-4 rounded-full flex items-center justify-center text-[10px]" style={{ backgroundColor: tokens.statusSuccess, color: 'white' }}>✓</span>
+            Yes, resolved
+          </button>
+          <button
+            disabled={isFeedbackLoading || isTyping}
+            onClick={handleGuidedNo}
+            className="flex-1 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 border transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ backgroundColor: tokens.statusWarningBg, color: 'var(--text-primary)', borderColor: `${tokens.statusWarning}55` }}
+          >
+            <span className="w-4 h-4 rounded-full flex items-center justify-center text-[10px]" style={{ backgroundColor: tokens.statusWarning, color: 'white' }}>×</span>
+            No, try another step
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div id="ai-chat-container" className="flex-1 flex h-full font-sans" style={{ backgroundColor: 'var(--app-bg)' }}>
       
@@ -388,6 +479,8 @@ export const AIChat: React.FC = () => {
               setCollapsedMessages({});
               setActiveSatisfactionCard(null);
               setConversationStatus('ACTIVE');
+              setGuidedActions([]);
+              setGuidedState(null);
             }}
             className="p-1.5 rounded-lg transition-all text-[10px] flex items-center gap-1.5 cursor-pointer border"
             style={{ backgroundColor: 'var(--card-bg-solid)', color: 'var(--text-secondary)', borderColor: 'var(--border)' }}
@@ -643,6 +736,7 @@ export const AIChat: React.FC = () => {
 
           {/* Conversation Satisfaction Prompt — rendered exactly once when the backend signals it. */}
           {renderSatisfactionCard()}
+          {renderGuidedActions()}
         </div>
 
         {/* Input Bar Section */}
@@ -659,6 +753,8 @@ export const AIChat: React.FC = () => {
             >
               <MessageSquare className="w-5 h-5 mr-3 mb-0.5" style={{ color: 'var(--text-tertiary)' }} />
               <textarea 
+                id="ai-copilot-message"
+                name="message"
                 placeholder="Ask IT support or troubleshoot connection problems..."
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -740,13 +836,24 @@ export const AIChat: React.FC = () => {
               </div>
 
               <button
-                onClick={handleConvertTicket}
+                onClick={() => {
+                  if (suggestedTicket.resolvedByAI) {
+                    const base = location.pathname.startsWith('/admin')
+                      ? '/admin/tickets'
+                      : location.pathname.startsWith('/agent')
+                        ? '/agent/tickets'
+                        : '/tickets';
+                    navigate(suggestedTicket.ticketId ? `${base}/${suggestedTicket.ticketId}` : `${base}?status=resolved_ai`);
+                    return;
+                  }
+                  handleConvertTicket();
+                }}
                 className="w-full py-2 rounded-lg text-[10px] font-semibold flex items-center justify-center space-x-2 transition-all cursor-pointer shadow-md"
-                style={{ backgroundColor: tokens.accentPrimary, color: 'var(--accent-primary-contrast)', boxShadow: `0 4px 12px ${tokens.accentPrimary}1a` }}
+                style={{ backgroundColor: suggestedTicket.resolvedByAI ? tokens.statusSuccess : tokens.accentPrimary, color: 'var(--accent-primary-contrast)', boxShadow: `0 4px 12px ${tokens.accentPrimary}1a` }}
                 onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.9'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
               >
-                <span>File Support Incident</span>
+                <span>{suggestedTicket.resolvedByAI ? 'Resolved by AI' : 'File Support Incident'}</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>

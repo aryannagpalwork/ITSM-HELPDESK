@@ -158,6 +158,33 @@ def rank_hybrid_results(query: str, results: list[dict[str, Any]]) -> list[dict[
     return ranked
 
 
+def _deduplicate_ranked_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove duplicate/near-duplicate chunks after reranking.
+
+    Upload-time overlap is useful for semantic continuity, but sending the
+    same text repeatedly to the LLM reduces answer quality. Keep the highest
+    ranked representative of each duplicate text block.
+    """
+    deduplicated: list[dict[str, Any]] = []
+    seen_texts: list[set[str]] = []
+    for item in results:
+        text = re.sub(r"\s+", " ", (item.get("chunk").text or "")).strip().lower()
+        tokens = set(_tokenize(text))
+        if not tokens:
+            continue
+        is_duplicate = text in {re.sub(r"\s+", " ", (existing.get("chunk").text or "")).strip().lower() for existing in deduplicated}
+        if not is_duplicate:
+            for previous_tokens in seen_texts:
+                overlap = len(tokens & previous_tokens) / max(1, len(tokens | previous_tokens))
+                if overlap >= 0.90:
+                    is_duplicate = True
+                    break
+        if not is_duplicate:
+            deduplicated.append(item)
+            seen_texts.append(tokens)
+    return deduplicated
+
+
 def keyword_search(query: str, chunks: list[DocumentChunk], top_k: int = 5) -> list[dict[str, Any]]:
     """Return keyword-overlap matches from indexed chunks."""
     query_terms = set(_tokenize(normalize_query(query)))
@@ -340,7 +367,8 @@ class FAISSRetriever(Retriever):
             embedding_result = self.embedding_provider.embed(variant)
             candidates = self.vector_store.search(
                 embedding_result.embedding,
-                top_k=max(effective_config.top_k, 10),
+                # Retrieve a broad candidate pool before hybrid reranking.
+                top_k=max(effective_config.top_k, 20),
                 filter_metadata=effective_config.filter_metadata,
             )
             for candidate in candidates:
@@ -352,7 +380,7 @@ class FAISSRetriever(Retriever):
         chunks = list(getattr(self.vector_store, "_chunks", {}).values()) if hasattr(self.vector_store, "_chunks") else []
         keyword_matches = []
         for variant in query_variants:
-            keyword_matches.extend(keyword_search(variant, chunks, top_k=max(effective_config.top_k, 10)))
+            keyword_matches.extend(keyword_search(variant, chunks, top_k=max(effective_config.top_k, 20)))
 
         merged: dict[str, dict[str, Any]] = {}
         for result in semantic_results:
@@ -386,6 +414,7 @@ class FAISSRetriever(Retriever):
                 item["hybrid_score"] = 0.65 * item["similarity_score"] + 0.35 * 0.0
 
         ranked = rank_hybrid_results(query, list(merged.values()))
+        ranked = _deduplicate_ranked_results(ranked)
         filtered = [item for item in ranked if validate_relevance(item, threshold=effective_config.relevance_threshold)]
         results = [
             VectorSearchResult(
@@ -411,6 +440,8 @@ class FAISSRetriever(Retriever):
                 "relevance_threshold": effective_config.relevance_threshold,
                 "expanded_query": query_variants,
                 "scores": [round(result.metadata.get("hybrid_score", result.similarity_score), 4) for result in results],
+                "candidate_count": len(ranked),
+                "reranked": True,
             },
         )
 
@@ -424,7 +455,7 @@ class FAISSRetriever(Retriever):
         start_time = time.perf_counter()
         search_results = self.vector_store.search(
             query_embedding,
-            top_k=max(effective_config.top_k, 10),
+            top_k=max(effective_config.top_k, 20),
             filter_metadata=effective_config.filter_metadata,
         )
         if not search_results:
@@ -447,6 +478,7 @@ class FAISSRetriever(Retriever):
             })
 
         ranked = rank_hybrid_results("", merged_candidates)
+        ranked = _deduplicate_ranked_results(ranked)
         filtered = [item for item in ranked if validate_relevance(item, threshold=effective_config.relevance_threshold)]
         results = [
             VectorSearchResult(
@@ -470,6 +502,8 @@ class FAISSRetriever(Retriever):
                 "query_embedding_length": len(query_embedding),
                 "latency_ms": round((time.perf_counter() - start_time) * 1000, 2),
                 "scores": [round(result.metadata.get("hybrid_score", result.similarity_score), 4) for result in results],
+                "candidate_count": len(ranked),
+                "reranked": True,
             },
         )
 

@@ -25,11 +25,11 @@ from app.schemas.knowledge_document import (
     RetrievedDocumentSource,
     SatisfactionCard,
 )
-from app.schemas.ticket import TicketCreate, TicketRead, TicketPriority
+from app.schemas.ticket import TicketCreate, TicketRead, TicketPriority, TicketStatus
 from app.services.password_reset import PasswordResetService
 from app.services.search_service import SearchService
 from app.services.llm.llm_factory import LLMServiceFactory
-from app.services.tickets import create_ticket
+from app.services.tickets import _write_audit, create_ticket, get_ticket
 from app.rag.prompt_builder import (
     PromptBuilderFactory,
     ChatMessage,
@@ -42,7 +42,13 @@ from app.rag.retriever import RetrievedContext
 logger = logging.getLogger(__name__)
 
 NO_KB_MATCH_RESPONSE = (
-    "I couldn't find relevant information in the organization's Knowledge Base."
+    "I couldn't find enough information in the knowledge base to answer that confidently. "
+    "Please raise a support ticket if you need further assistance."
+)
+
+GUIDED_NO_SOLUTION_RESPONSE = (
+    "I couldn't fully resolve your issue using the available knowledge base.\n\n"
+    "Please click 'File Ticket' in the sidebar to raise this issue to the IT support team."
 )
 
 GREETING_PHRASES = {
@@ -151,6 +157,94 @@ def _get_or_create_tracker(session_id: str | None) -> ConversationTracker:
     return _CONVERSATION_TRACKERS[session_id]
 
 
+def _is_explicit_resolution_reply(query: str) -> bool:
+    normalized = re.sub(r"[^a-z]", "", (query or "").lower())
+    return normalized in {"yes", "y", "yeah", "yep", "resolved", "fixed", "itworks", "nowworking"}
+
+
+def _is_explicit_negative_reply(query: str) -> bool:
+    normalized = re.sub(r"[^a-z]", "", (query or "").lower())
+    return normalized in {"no", "n", "nope", "notfixed", "stillbroken", "stillnotworking"}
+
+
+def _conversation_text(history: list[ChatMessage], latest: str) -> str:
+    parts = [f"{message.role.value}: {message.content}" for message in history]
+    parts.append(f"user: {latest}")
+    # Keep retrieval prompts bounded while preserving the most recent context.
+    return "\n".join(parts)[-12000:]
+
+
+def _kb_prompt_context(retrieved_context: RetrievedContext) -> str:
+    return "\n\n".join(
+        f"[{index + 1}] {chunk.heading or ''}\n{chunk.text}"
+        for index, chunk in enumerate(retrieved_context.chunks)
+    )
+
+
+def _parse_guided_decision(raw: str) -> dict | None:
+    try:
+        match = re.search(r"\{.*\}", raw or "", re.DOTALL)
+        if not match:
+            return None
+        decision = json.loads(match.group(0))
+        if not isinstance(decision, dict):
+            return None
+        return decision
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def _guided_decision(
+    llm_service,
+    history: list[ChatMessage],
+    latest: str,
+    retrieved_context: RetrievedContext,
+    asked: list[str],
+) -> dict | None:
+    """Ask the configured model for the next minimal diagnostic question.
+
+    The model is constrained by retrieved KB text and returns structured data;
+    this keeps issue categories and questions dynamic instead of maintaining a
+    hardcoded category/question matrix in the application.
+    """
+    if not retrieved_context.chunks:
+        return None
+    prompt = BuiltPrompt(
+        messages=[
+            ChatMessage(
+                role=MessageRole.SYSTEM,
+                content=(
+                    "You are a guided IT troubleshooting intake assistant. Use only the supplied Knowledge Base text. "
+                    "Identify the likely issue type and decide whether one more diagnostic detail is required before giving steps. "
+                    "Ask at most one concise, high-value question. Never ask a question already asked. "
+                    "Return ONLY JSON: {\"issue_type\": string, \"ready\": boolean, \"question\": string}. "
+                    "Set ready=true when the conversation contains enough detail to provide KB-grounded steps."
+                ),
+            ),
+            ChatMessage(
+                role=MessageRole.USER,
+                content=(
+                    f"Knowledge Base:\n{_kb_prompt_context(retrieved_context)}\n\n"
+                    f"Conversation:\n{_conversation_text(history, latest)}\n\n"
+                    f"Questions already asked: {json.dumps(asked)}"
+                ),
+            ),
+        ],
+        context_used=retrieved_context,
+    )
+    try:
+        raw, _ = llm_service.generate_response(prompt, temperature=0.0, max_output_tokens=180)
+        decision = _parse_guided_decision(raw)
+        if decision and isinstance(decision.get("ready"), bool):
+            question = str(decision.get("question") or "").strip()
+            if not decision["ready"] and question and question not in asked:
+                return {"issue_type": str(decision.get("issue_type") or "Technical issue"), "question": question, "ready": False}
+            return {"issue_type": str(decision.get("issue_type") or "Technical issue"), "question": None, "ready": True}
+    except Exception:
+        logger.exception("Guided troubleshooting decision failed; continuing with standard RAG")
+    return None
+
+
 def _should_show_satisfaction_card(tracker: ConversationTracker) -> tuple[bool, str | None]:
     """Apply the 5 user-specified satisfaction prompt rules.
 
@@ -217,7 +311,9 @@ async def _get_conversation_state(
 
     state = metadata.get("conversation_state") or "ACTIVE"
     iterations = int(metadata.get("unsuccessful_troubleshooting_iterations", 0) or 0)
-    return state, {"conversation_state": state, "unsuccessful_troubleshooting_iterations": iterations}
+    metadata["conversation_state"] = state
+    metadata["unsuccessful_troubleshooting_iterations"] = iterations
+    return state, metadata
 
 
 def _update_conversation_metadata(
@@ -355,6 +451,147 @@ async def _upsert_ai_conversation_record(
         upsert=True,
     )
     return record
+
+
+async def _ensure_ai_resolved_ticket(
+    db: DatabaseSession,
+    session_id: str,
+    current_user: dict,
+) -> TicketRead:
+    """Create one persistent, already-resolved ticket for an AI-resolved chat.
+
+    This is deliberately idempotent. It records the resolution in the normal
+    tickets collection for reporting and history, while remaining separate
+    from human escalation and never creating a second ticket on retries.
+    """
+    conversation = await db["ai_conversations"].find_one({"conversation_id": session_id})
+    if conversation and conversation.get("ticket_id"):
+        existing_ticket = await db["tickets"].find_one({"_id": conversation["ticket_id"]})
+        if existing_ticket:
+            return await get_ticket(
+                db, existing_ticket["_id"], {"id": current_user.get("id"), "internal_role": "admin"}
+            )
+
+    # Recover safely from a partial/retried resolution where the conversation
+    # record was written but its ticket_id link was not. This keeps resolution
+    # idempotent and prevents duplicate tickets.
+    existing_ai_ticket = await db["tickets"].find_one({"ai_conversation_id": session_id})
+    if existing_ai_ticket:
+        await db["ai_conversations"].update_one(
+            {"conversation_id": session_id},
+            {"$set": {"ticket_id": existing_ai_ticket["_id"], "ai_ticket_id": existing_ai_ticket["_id"]}},
+        )
+        return await get_ticket(
+            db, existing_ai_ticket["_id"], {"id": current_user.get("id"), "internal_role": "admin"}
+        )
+
+    history_records = await db["chat_history"].find({"session_id": session_id}).sort("created_at").to_list(length=None)
+    user_messages = [row.get("message", "") for row in history_records if row.get("role") == "user"]
+    ticket_details: dict = {}
+    for row in reversed(history_records):
+        if row.get("role") != "assistant" or not row.get("metadata_json"):
+            continue
+        try:
+            metadata = json.loads(row["metadata_json"])
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if isinstance(metadata.get("suggested_ticket"), dict):
+            ticket_details = metadata["suggested_ticket"]
+            break
+
+    if not ticket_details:
+        history = [
+            ChatMessage(
+                role=MessageRole.USER if row.get("role") == "user" else MessageRole.ASSISTANT,
+                content=row.get("message", ""),
+            )
+            for row in history_records
+        ]
+        try:
+            ticket_details, _ = LLMServiceFactory.create(get_settings().llm_provider).generate_ticket_details(history)
+        except Exception:
+            logger.exception("AI-resolved ticket detail generation failed; using conversation fallback")
+
+    title = str(ticket_details.get("title") or (user_messages[0] if user_messages else "AI Resolved Support Request"))[:255]
+    description = str(ticket_details.get("description") or "\n".join(user_messages) or "Issue resolved by AI Copilot.")
+    category = str(ticket_details.get("category") or "General")
+    priority_value = str(ticket_details.get("priority") or "Medium").replace("_", " ").title()
+    priority = TicketPriority(priority_value) if priority_value in {item.value for item in TicketPriority} else TicketPriority.medium
+    now = datetime.utcnow()
+    ai_payload_data = {
+        "title": title,
+        "description": description,
+        "category": category,
+        "priority": priority,
+        "status": TicketStatus.resolved,
+        "resolution": "Resolved by AI",
+        "ai_summary": str(ticket_details.get("summary") or "Resolved by AI Copilot"),
+    }
+    logger.info("AI ticket creation payload prepared session_id=%s payload=%s", session_id, ai_payload_data)
+    try:
+        ai_payload = TicketCreate(**ai_payload_data)
+        ticket = await create_ticket(
+            db,
+            ai_payload,
+            reason="Resolved by AI",
+            current_user=current_user,
+            resolved_by="AI",
+            resolution_source="AI",
+            ai_resolved=True,
+            ai_conversation_id=session_id,
+        )
+    except Exception:
+        logger.exception("AI ticket creation failed session_id=%s payload=%s", session_id, ai_payload_data)
+        raise
+    await db["tickets"].update_one(
+        {"_id": ticket.id},
+        {"$set": {
+            "resolved_at": now,
+            "closed_at": now,
+            "updated_at": now,
+        }},
+    )
+    logger.info(
+        "AI ticket resolved timestamps saved ticket_id=%s ticket_number=%s resolved_at=%s closed_at=%s",
+        ticket.id,
+        ticket.ticket_number,
+        now,
+        now,
+    )
+    await _write_audit(
+        db,
+        action="ticket.resolved",
+        user_id=None,
+        ticket_id=ticket.id,
+        field="Resolution Source",
+        old_value=None,
+        new_value="AI",
+        reason="Automatically resolved by AI Copilot",
+    )
+    await db["ai_conversations"].update_one(
+        {"conversation_id": session_id},
+        {"$set": {
+            "ticket_id": ticket.id,
+            "ai_ticket_id": ticket.id,
+            "resolution_source": "AI",
+            "escalated": False,
+            "updated_at": now,
+        }},
+    )
+    for row in history_records:
+        metadata = {}
+        if row.get("metadata_json"):
+            try:
+                metadata = json.loads(row["metadata_json"])
+            except (TypeError, json.JSONDecodeError):
+                metadata = {}
+        metadata["ticket_id"] = ticket.id
+        metadata["resolution_source"] = "AI"
+        await db["chat_history"].update_one(
+            {"_id": row["_id"]},
+            {"$set": {"metadata_json": json.dumps(metadata)}},
+        )
+    return ticket
 
 
 # ──────────────────────────────────────────────
@@ -721,6 +958,28 @@ async def chat(
     query_type = _classify_query(payload.query)
     logger.debug("Chat query type=%s query=%r", query_type, payload.query)
 
+    # Convert the client-supplied history once and use it for both retrieval
+    # and generation. This makes follow-up observations first-class context.
+    chat_history = []
+    for msg in payload.chat_history:
+        role = MessageRole.USER if msg.role.lower() == "user" else MessageRole.ASSISTANT
+        chat_history.append(ChatMessage(role=role, content=msg.content))
+
+    # The browser history remains supported, while the persisted session
+    # history is used as the authoritative fallback so context survives page
+    # refreshes and long-running conversations.
+    if payload.session_id:
+        history_cursor = db["chat_history"].find({"session_id": session_id}).sort("created_at")
+        persisted_history = await history_cursor.to_list(length=None)
+        if persisted_history:
+            chat_history = [
+                ChatMessage(
+                    role=MessageRole.USER if item.get("role") == "user" else MessageRole.ASSISTANT,
+                    content=item.get("message", ""),
+                )
+                for item in persisted_history
+            ]
+
     if query_type == "GREETING":
         logger.debug("Chat response source=Greeting kb_hit=false")
         llm_service = LLMServiceFactory.create(settings.llm_provider)
@@ -739,6 +998,16 @@ async def chat(
         )
 
     # All non-greeting queries search the existing KB before response generation.
+    guided_metadata = dict(conversation_metadata.get("guided", {}) or {})
+    guided_phase = str(guided_metadata.get("phase") or "DIAGNOSIS")
+    original_issue = str(guided_metadata.get("original_issue") or payload.query)
+    retrieval_query = (
+        f"Original issue: {original_issue}\n"
+        f"Diagnostic answers: {json.dumps(guided_metadata.get('diagnostic_answers', []))}\n"
+        f"Previous troubleshooting: {json.dumps(guided_metadata.get('previous_troubleshooting_steps', []))}\n"
+        f"User observations: {json.dumps(guided_metadata.get('user_observations', []))}\n"
+        f"Conversation: {_conversation_text(chat_history, payload.query)}"
+    )
     rag_settings = get_rag_settings()
     configured_threshold = rag_settings.similarity_threshold
     retrieval_threshold = (
@@ -750,8 +1019,10 @@ async def chat(
     try:
         search_service = SearchService(db=db)
         retrieved_context = search_service.search(
-            query=payload.query,
-            top_k=payload.top_k,
+            query=retrieval_query,
+            # Evaluate a broad Top-20 candidate pool; the final Top-5 is
+            # selected after excluding solutions already shown in this chat.
+            top_k=20,
             similarity_threshold=retrieval_threshold,
             relevance_threshold=relevance_threshold,
         )
@@ -766,6 +1037,60 @@ async def chat(
     except Exception:
         logger.exception("Chat retrieval failed query_type=%s", query_type)
         retrieved_context = RetrievedContext(chunks=[], search_results=[], total_retrieved=0)
+
+    # Do not repeat chunks already used in earlier troubleshooting attempts.
+    used_chunk_ids = set(guided_metadata.get("kb_articles_used", []) or [])
+    if used_chunk_ids:
+        filtered_results = [r for r in retrieved_context.search_results if r.chunk.chunk_id not in used_chunk_ids]
+        retrieved_context = RetrievedContext(
+            chunks=[r.chunk for r in filtered_results[:5]],
+            search_results=filtered_results[:5],
+            total_retrieved=min(5, len(filtered_results)),
+            filter_applied=retrieved_context.filter_applied,
+            metadata={**retrieved_context.metadata, "candidate_count": len(filtered_results)},
+        )
+    elif len(retrieved_context.search_results) > 5:
+        retrieved_context = RetrievedContext(
+            chunks=[r.chunk for r in retrieved_context.search_results[:5]],
+            search_results=retrieved_context.search_results[:5],
+            total_retrieved=5,
+            filter_applied=retrieved_context.filter_applied,
+            metadata={**retrieved_context.metadata, "candidate_count": len(retrieved_context.search_results)},
+        )
+
+    # A typed Yes follows the same resolved path as the UI action only after
+    # troubleshooting has started. During diagnosis, Yes/No are ordinary
+    # answers to the pending diagnostic question.
+    troubleshooting_active = guided_phase in {"TROUBLESHOOTING", "KB_EXHAUSTED"} or bool(used_chunk_ids)
+    if payload.session_id and troubleshooting_active and _is_explicit_resolution_reply(payload.query):
+        await _upsert_ai_conversation_record(
+            db,
+            session_id,
+            current_user.get("id"),
+            "RESOLVED",
+            feedback="positive",
+            resolved_by_ai=True,
+        )
+        answer = "Thanks for confirming. Your issue has been marked as Resolved by AI."
+        await _save_chat_messages(db, session_id, payload.query, answer, {
+            "conversation_state": "RESOLVED",
+            "guided_state": "RESOLVED",
+            "resolved_by_ai": True,
+        })
+        ai_ticket = await _ensure_ai_resolved_ticket(db, session_id, current_user)
+        return ChatResponse(
+            answer=answer,
+            sources=[],
+            confidence=1.0,
+            retrieved_documents=0,
+            session_id=session_id,
+            suggested_ticket=None,
+            satisfaction_card=None,
+            guided_actions=[],
+            guided_state="RESOLVED",
+            ticket_id=ai_ticket.id,
+            ticket_number=ai_ticket.ticket_number,
+        )
 
     # ── Step 0: Password-Reset Intent Detection (pre-RAG) ──
     intent = _detect_password_reset_intent(payload.query)
@@ -818,16 +1143,6 @@ async def chat(
     response_query_type = query_type if kb_hit else "OUT_OF_SCOPE"
     llm_service = None
 
-    # Convert chat history
-    chat_history = []
-    for msg in payload.chat_history:
-        role = (
-            MessageRole.USER
-            if msg.role.lower() == "user"
-            else MessageRole.ASSISTANT
-        )
-        chat_history.append(ChatMessage(role=role, content=msg.content))
-
     # Calculate confidence from the already threshold-filtered results.
     confidence = 0.0
     if retrieved_context.search_results:
@@ -836,7 +1151,49 @@ async def chat(
         ) / len(retrieved_context.search_results)
         confidence = avg_similarity
 
-    if kb_hit:
+    guided_question = None
+    guided_state = guided_phase
+    guided_actions = ["Yes", "No"]
+    # Diagnostic intake is only for the initial issue/context collection. Once
+    # a grounded troubleshooting response has been delivered, every follow-up
+    # (including a No action) must retrieve a new solution directly rather than
+    # asking another diagnostic question.
+    pending_question = str(guided_metadata.get("pending_question") or "").strip()
+    troubleshooting_active = guided_phase in {"TROUBLESHOOTING", "KB_EXHAUSTED"} or bool(used_chunk_ids)
+    if pending_question and not troubleshooting_active:
+        guided_metadata.setdefault("diagnostic_answers", []).append({
+            "question": pending_question,
+            "answer": payload.query,
+        })
+        guided_metadata.setdefault("answers", []).append(payload.query)
+        guided_metadata["pending_question"] = None
+
+    if kb_hit and guided_phase == "DIAGNOSIS" and not troubleshooting_active:
+        decision = _guided_decision(
+            LLMServiceFactory.create(settings.llm_provider),
+            chat_history,
+            payload.query,
+            retrieved_context,
+            list(guided_metadata.get("diagnostic_questions_asked", []) or []),
+        )
+        if decision and not decision.get("ready"):
+            guided_question = decision["question"]
+            guided_state = "DIAGNOSING"
+            guided_phase = "DIAGNOSIS"
+            guided_metadata["issue_type"] = decision["issue_type"]
+            guided_metadata["original_issue"] = original_issue
+            guided_metadata.setdefault("diagnostic_questions_asked", []).append(guided_question)
+            guided_metadata["pending_question"] = guided_question
+        else:
+            guided_phase = "TROUBLESHOOTING"
+            guided_state = "TROUBLESHOOTING"
+
+    if guided_question:
+        answer = guided_question
+        guided_actions = []
+        kb_hit = True
+        confidence = confidence or 1.0
+    elif kb_hit:
         prompt_builder = PromptBuilderFactory.create("rag")
         built_prompt = prompt_builder.build(
             query=payload.query,
@@ -849,6 +1206,8 @@ async def chat(
             "You may summarize, explain, format, or restructure it, but must not add "
             "external facts or rely on world knowledge. If the context does not answer "
             "the question, say that the Knowledge Base does not contain the information."
+            " Do not repeat any troubleshooting step already present in the previous attempts below."
+            f"\nPrevious attempts: {json.dumps(guided_metadata.get('previous_troubleshooting_steps', []))}"
         )
         llm_service = LLMServiceFactory.create(settings.llm_provider)
         answer, _ = llm_service.generate_response(built_prompt)
@@ -858,7 +1217,17 @@ async def chat(
             len(retrieved_context.chunks),
         )
     else:
-        answer = NO_KB_MATCH_RESPONSE
+        answer = (
+            GUIDED_NO_SOLUTION_RESPONSE
+            if guided_metadata.get("kb_articles_used") or guided_phase == "TROUBLESHOOTING"
+            else NO_KB_MATCH_RESPONSE
+        )
+        guided_state = "NO_SOLUTION"
+        guided_phase = "KB_EXHAUSTED"
+        guided_actions = []
+
+    if kb_hit and not guided_question and "Did this fix your issue?" not in answer:
+        answer = f"{answer.rstrip()}\n\nDid this fix your issue?"
         logger.debug(
             "Chat response source=No KB Match query_type=%s kb_hit=false threshold=%s documents=0",
             response_query_type,
@@ -895,6 +1264,18 @@ async def chat(
 
     updated_metadata["conversation_state"] = conversation_state or "ACTIVE"
     updated_metadata["tracker_snapshot"] = tracker.model_dump()
+    guided_metadata["original_issue"] = original_issue
+    guided_metadata["phase"] = guided_phase
+    guided_metadata["troubleshooting_attempts"] = int(guided_metadata.get("troubleshooting_attempts", 0) or 0) + (0 if guided_question else 1)
+    if not guided_question:
+        guided_metadata["kb_articles_used"] = list(dict.fromkeys(list(used_chunk_ids) + [r.chunk.chunk_id for r in retrieved_context.search_results]))
+    if guided_phase == "TROUBLESHOOTING" and not guided_question and not _is_explicit_negative_reply(payload.query) and not _is_explicit_resolution_reply(payload.query):
+        guided_metadata.setdefault("user_observations", []).append(payload.query)
+    if kb_hit and not guided_question:
+        previous_steps = guided_metadata.setdefault("previous_troubleshooting_steps", [])
+        if answer not in previous_steps:
+            previous_steps.append(answer)
+    updated_metadata["guided"] = guided_metadata
     await _upsert_ai_conversation_record(
         db,
         session_id,
@@ -929,7 +1310,7 @@ async def chat(
 
     # Step 6: Generate suggested ticket if confidence is low
     suggested_ticket = None
-    if confidence < 0.5:
+    if confidence < 0.5 and guided_state != "NO_SOLUTION":
         # Do NOT suggest tickets for normal password-reset conversations
         is_pw_conversation = _is_password_reset_conversation(current_state) or intent is not None
         if not is_pw_conversation:
@@ -980,6 +1361,7 @@ async def chat(
         "unsuccessful_troubleshooting_iterations": int(updated_metadata.get("unsuccessful_troubleshooting_iterations", 0) or 0),
         "satisfaction_prompt": bool(updated_metadata.get("satisfaction_prompt", False)),
         "ticket_prompt": bool(updated_metadata.get("ticket_prompt", False)),
+        "guided": guided_metadata,
     }
     if suggested_ticket:
         assistant_metadata["suggested_ticket"] = suggested_ticket
@@ -1002,6 +1384,10 @@ async def chat(
         session_id=session_id,
         suggested_ticket=suggested_ticket,
         satisfaction_card=satisfaction_card,
+        diagnostic_question=guided_question,
+        guided_actions=guided_actions,
+        guided_state=guided_state,
+        ticket_id=None,
     )
 
 
@@ -1026,11 +1412,16 @@ async def submit_ai_conversation_feedback(
         feedback=feedback,
         resolved_by_ai=(feedback == "positive"),
     )
+    ai_ticket = None
+    if feedback == "positive":
+        ai_ticket = await _ensure_ai_resolved_ticket(db, session_id, current_user)
     return {
         "conversation_id": session_id,
         "conversation_status": record.get("conversation_status", target_status),
         "feedback": feedback,
         "resolved_by_ai": bool(record.get("resolved_by_ai", feedback == "positive")),
+        "ticket_id": ai_ticket.id if ai_ticket else record.get("ticket_id"),
+        "ticket_number": ai_ticket.ticket_number if ai_ticket else None,
     }
 
 

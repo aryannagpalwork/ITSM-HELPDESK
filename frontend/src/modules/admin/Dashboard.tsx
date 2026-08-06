@@ -228,6 +228,8 @@ export const AdminDashboard: React.FC = () => {
           <label className="flex items-center gap-2 text-[9px] font-mono uppercase text-tertiary">
             Month
             <select
+              id="analytics-month"
+              name="month"
               value={month}
               onChange={(event) => setMonth(Number(event.target.value))}
               className="bg-input border border-token rounded-lg px-2 py-1.5 text-[10px] text-secondary outline-none"
@@ -241,6 +243,8 @@ export const AdminDashboard: React.FC = () => {
           <label className="flex items-center gap-2 text-[9px] font-mono uppercase text-tertiary">
             Year
             <select
+              id="analytics-year"
+              name="year"
               value={year}
               onChange={(event) => setYear(Number(event.target.value))}
               className="bg-input border border-token rounded-lg px-2 py-1.5 text-[10px] text-secondary outline-none"
@@ -287,7 +291,9 @@ export const AdminDashboard: React.FC = () => {
                 onClick={() => goToTickets(
                   metric.key === 'inProgress'
                     ? '?status=in_progress'
-                    : metric.key === 'totalCreated' ? '' : '?status=resolved'
+                    : metric.key === 'totalCreated' ? ''
+                      : metric.key === 'aiResolved' ? '?status=resolved_ai'
+                      : '?status=resolved'
                 )}
                 className={`text-left bg-card-solid border ${metric.border} rounded-2xl p-3 transition-transform hover:-translate-y-0.5 hover:shadow-lg cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-accent/50`}
                 title={`Open ${metric.label.toLowerCase()}`}

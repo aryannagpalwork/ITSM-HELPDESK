@@ -147,6 +147,19 @@ class EmbeddingService:
         # Set document ID on chunks
         for chunk in chunks:
             chunk.document_id = db_doc.id
+            # Keep retrieval metadata attached to the persisted vector. This
+            # enriches ranking/context without changing the MongoDB schema.
+            chunk.chunk_metadata.update({
+                "document_name": getattr(db_doc, "title", loaded_doc.metadata.file_name),
+                "category": getattr(db_doc, "category", None),
+                "tags": list(getattr(db_doc, "tags", []) or []),
+                "issue_type": getattr(db_doc, "category", None) or "General",
+                "product_or_device": getattr(db_doc, "title", loaded_doc.metadata.file_name),
+                "section": chunk.section,
+            })
+            chunk.metadata.additional_metadata.update({
+                "chunk_metadata": chunk.chunk_metadata,
+            })
 
         # Generate embeddings
         texts = [chunk.text for chunk in chunks]
@@ -274,7 +287,10 @@ class EmbeddingService:
                 "text": chunk.text,
                 "start_index": chunk.start_index,
                 "end_index": chunk.end_index,
-                "metadata_json": json.dumps(chunk.metadata.additional_metadata) if chunk.metadata.additional_metadata else None,
+                "metadata_json": json.dumps({
+                    **(chunk.metadata.additional_metadata or {}),
+                    **(chunk.chunk_metadata or {}),
+                }) if (chunk.metadata.additional_metadata or chunk.chunk_metadata) else None,
                 "embedding_json": json.dumps(chunk.embedding) if chunk.embedding else None,
             }
             docs_to_insert.append(db_chunk)

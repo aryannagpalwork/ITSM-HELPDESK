@@ -78,6 +78,8 @@ export const Register: React.FC = () => {
             <label className="block text-[11px] font-mono uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Full Name</label>
             <div className="relative">
               <input 
+                id="register-name"
+                name="fullName"
                 type="text" 
                 placeholder="John Doe"
                 value={fullName}
@@ -94,7 +96,9 @@ export const Register: React.FC = () => {
 
           <div>
             <label className="block text-[11px] font-mono uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Corporate Email</label>
-            <input 
+            <input
+              id="register-email"
+              name="email"
               type="email" 
               placeholder="name@company.com"
               value={email}
@@ -110,8 +114,10 @@ export const Register: React.FC = () => {
           <div>
             <label className="block text-[11px] font-mono uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Password</label>
             <div className="relative">
-              <input 
-                type="password" 
+            <input
+              id="register-password"
+              name="password"
+              type="password"
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -129,6 +135,8 @@ export const Register: React.FC = () => {
             <label className="block text-[11px] font-mono uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Role</label>
             <div className="relative">
               <select
+                id="register-role"
+                name="role"
                 value={role}
                 onChange={(e) => setRole(e.target.value as 'Employee' | 'Agent')}
                 disabled={isLoading}

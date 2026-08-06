@@ -127,6 +127,8 @@ export const ResetPassword: React.FC = () => {
             <label className="block text-[11px] font-mono uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>New password</label>
             <div className="relative">
               <input
+                id="reset-new-password"
+                name="newPassword"
                 type="password"
                 placeholder="Enter a new password"
                 value={newPassword}
@@ -145,6 +147,8 @@ export const ResetPassword: React.FC = () => {
             <label className="block text-[11px] font-mono uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Confirm password</label>
             <div className="relative">
               <input
+                id="reset-confirm-password"
+                name="confirmPassword"
                 type="password"
                 placeholder="Confirm the new password"
                 value={confirmPassword}
