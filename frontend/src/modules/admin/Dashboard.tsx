@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useCallback } from 'react';
+import React, { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../shared/AppContext';
 import { useAdminDashboard } from './useAdminDashboard';
@@ -22,7 +22,13 @@ import {
   Ticket,
   Bot,
   UserCheck,
+  ShieldCheck,
+  CheckCircle2,
+  ExternalLink,
+  RefreshCw,
 } from 'lucide-react';
+import { SystemAlert } from '../../shared/types';
+import { getAutoDetectedActiveAlerts } from '../../shared/api';
 
 const TicketLifecycleDetailChart = lazy(() => import('./components/charts/TicketLifecycleDetailChart'));
 const SLAComplianceChart = lazy(() => import('./components/charts/SLAComplianceChart'));
@@ -51,6 +57,30 @@ export const AdminDashboard: React.FC = () => {
 
   const isAdmin = currentUser.role === 'Administrator';
   const isAuthorized = isAdmin || currentUser.role === 'Agent';
+
+  // Persistent Active Anomalies state & 30s polling
+  const [activeAnomalies, setActiveAnomalies] = useState<SystemAlert[]>([]);
+  const [anomaliesLoading, setAnomaliesLoading] = useState(false);
+
+  const fetchAnomalies = async () => {
+    try {
+      setAnomaliesLoading(true);
+      const data = await getAutoDetectedActiveAlerts();
+      setActiveAnomalies(data);
+    } catch {
+      // ignore
+    } finally {
+      setAnomaliesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isAuthorized) {
+      fetchAnomalies();
+      const interval = setInterval(fetchAnomalies, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [isAuthorized]);
 
   const {
     month,
@@ -130,6 +160,81 @@ export const AdminDashboard: React.FC = () => {
             <span>Sys Uptime: 99.98%</span>
           </div>
         </div>
+      </div>
+
+      {/* Persistent Active Anomalies Banner */}
+      <div className="mb-6 p-4 rounded-2xl bg-card border border-border">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            {activeAnomalies.length > 0 ? (
+              <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20 animate-pulse">
+                <AlertTriangle className="w-4 h-4" />
+              </div>
+            ) : (
+              <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                <CheckCircle2 className="w-4 h-4" />
+              </div>
+            )}
+            <div>
+              <h2 className="text-xs font-bold text-primary flex items-center gap-2">
+                <span>Active Category Anomalies</span>
+                <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-300">
+                  Auto-Detected ({activeAnomalies.length})
+                </span>
+              </h2>
+              <p className="text-[11px] text-secondary">
+                Real-time automated ticket volume spikes requiring administrative attention. Refreshes every 30s.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => fetchAnomalies()}
+              className="p-1.5 rounded-lg bg-app border border-border text-secondary hover:text-primary transition-colors"
+              title="Refresh Anomalies"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${anomaliesLoading ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/admin/alerts')}
+              className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition-all shadow-md shadow-purple-600/20 flex items-center gap-1.5"
+            >
+              <span>Manage Alerts</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {activeAnomalies.length === 0 ? (
+          <div className="p-3 rounded-xl bg-app border border-border text-xs text-tertiary flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>System Normal: No automated ticket volume anomalies currently detected.</span>
+          </div>
+        ) : (
+          <div className="space-y-2 mt-2">
+            {activeAnomalies.map((anomaly) => (
+              <div
+                key={anomaly.id}
+                className="p-3 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-start justify-between gap-3 text-xs"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <span className="font-bold text-purple-300">{anomaly.title}</span>
+                    {anomaly.category && (
+                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-200 uppercase font-semibold">
+                        {anomaly.category}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-secondary">{anomaly.message}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Organizational Overview KPI Row */}

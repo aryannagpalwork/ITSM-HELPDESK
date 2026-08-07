@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from math import ceil
 import json
 import logging
@@ -6,6 +6,10 @@ from uuid import uuid4
 
 from fastapi import HTTPException, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
+
+from app.config.settings import get_settings
+
+logger = logging.getLogger(__name__)
 
 from app.schemas.ticket import (
     SortOrder,
@@ -113,12 +117,16 @@ async def _notify_assignment(db: AsyncIOMotorDatabase, ticket: dict, agent: dict
     recipient_ids = [agent["_id"]]
     if requester_id and requester_id != agent["_id"]:
         recipient_ids.append(requester_id)
+
     await db.notifications.insert_many([
         {
             "_id": str(uuid4()), "user_id": recipient_id, "type": "ticket.assigned",
             "ticket_id": ticket["_id"],
-            "message": "Your ticket has been assigned to an IT agent." if recipient_id == requester_id
-                       else f"Ticket {ticket['ticket_number']} has been assigned to you.",
+            "message": (
+                "Ticket has been created." if recipient_id == agent["_id"] and requester_id == agent["_id"]
+                else f"Ticket {ticket['ticket_number']} has been assigned to you." if recipient_id == agent["_id"]
+                else "Your ticket has been assigned to an IT agent."
+            ),
             "read": False, "created_at": datetime.utcnow(),
         }
         for recipient_id in recipient_ids
@@ -410,6 +418,9 @@ async def _serialize_ticket(ticket: dict, db: AsyncIOMotorDatabase) -> TicketRea
     )
 
 
+
+
+
 async def create_ticket(
     db: AsyncIOMotorDatabase,
     payload: TicketCreate,
@@ -559,6 +570,17 @@ async def create_ticket(
         ticket_id=ticket_id,
         reason=("Created by AI Copilot" if ai_resolved else reason),
     )
+
+    # Trigger anomaly detection check on every ticket creation without closing
+    # the current window prematurely. The scheduler owns advancing the cursor
+    # once a full window has elapsed, so multiple tickets created in the same
+    # burst can still be counted together.
+    try:
+        from app.services.anomaly_scheduler import run_anomaly_detection
+        await run_anomaly_detection(db, advance_cursor=False)
+    except Exception as exc:
+        logger.warning("Anomaly detection on ticket create failed: %s", exc)
+
     # Use admin context for serialization (RBAC is enforced by the caller)
     return await get_ticket(db, ticket_id, {"id": created_by_id, "internal_role": "admin"})
 
@@ -796,6 +818,8 @@ async def update_ticket(db: AsyncIOMotorDatabase, ticket_id: str, payload: Ticke
         requested_assignee = ticket.get("assigned_to")
 
     await db.tickets.update_one({"_id": ticket_id}, {"$set": update_data})
+
+
 
     if assignment_changed:
         assignment_view = {**ticket, "assigned_to": ticket.get("assigned_to"),

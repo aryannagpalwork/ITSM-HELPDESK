@@ -15,7 +15,8 @@ import {
   ChevronRight,
   Database,
   UserPlus,
-  KeyRound
+  KeyRound,
+  Megaphone
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -69,6 +70,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
       name: 'Admin Command', 
       path: '/admin', 
       icon: ShieldAlert,
+      roles: ['Administrator']
+    },
+    { 
+      name: 'Alert Management', 
+      path: '/admin/alerts', 
+      icon: Megaphone,
       roles: ['Administrator']
     },
     { 

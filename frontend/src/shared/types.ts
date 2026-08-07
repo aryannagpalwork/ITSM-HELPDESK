@@ -89,6 +89,36 @@ export interface KnowledgeArticle {
   tags: string[];
 }
 
+export interface SystemAlert {
+  id: string;
+  title: string;
+  message: string;
+  recommendation?: string | null;
+  source: 'manual' | 'auto_detected';
+  category?: string | null;
+  status: 'active' | 'resolved';
+  createdBy?: string | null;
+  createdAt: string;
+  resolvedBy?: string | null;
+  resolvedAt?: string | null;
+  ticketCount?: number | null;
+  relatedTicketIds?: string[] | null;
+  windowStart?: string | null;
+  windowEnd?: string | null;
+}
+
+export interface UserNotification {
+  id: string;
+  userId: string;
+  type: 'alert' | 'info';
+  title: string;
+  message: string;
+  ticketId?: string | null;
+  alertId?: string | null;
+  read: boolean;
+  createdAt: string;
+}
+
 export interface DashboardStats {
   totalTickets: number;
   openTickets: number;

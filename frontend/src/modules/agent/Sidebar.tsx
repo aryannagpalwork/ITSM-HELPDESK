@@ -1,15 +1,16 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useApp } from '../../shared/AppContext';
-import { 
-  LayoutDashboard, 
-  MessageSquareCode, 
-  TicketCheck, 
+import {
+  LayoutDashboard,
+  MessageSquareCode,
+  TicketCheck,
   CalendarDays,
-  LogOut, 
+  LogOut,
   Sparkles,
   ChevronRight,
-  KeyRound
+  KeyRound,
+  AlertTriangle,
 } from 'lucide-react';
 
 export const AgentSidebar: React.FC = () => {
@@ -37,6 +38,11 @@ export const AgentSidebar: React.FC = () => {
       name: 'Ticket Queue', 
       path: '/agent/tickets', 
       icon: TicketCheck,
+    },
+    {
+      name: 'Alert Center',
+      path: '/agent/alerts',
+      icon: AlertTriangle,
     },
     {
       name: 'Leave Calendar',

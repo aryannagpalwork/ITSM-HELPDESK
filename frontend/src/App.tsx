@@ -17,6 +17,8 @@ import { KnowledgeBase } from './pages/KnowledgeBase';
 import { Settings } from './pages/Settings';
 import { AgentLeave } from './pages/AgentLeave';
 import { AdminLeaveManagement } from './pages/AdminLeaveManagement';
+import { AdminAlertManagement } from './pages/AdminAlertManagement';
+import { AgentAlertManagement } from './pages/AgentAlertManagement';
 
 // Import Module Layouts
 import { EmployeeLayout } from './modules/employee/Layout';
@@ -163,6 +165,13 @@ export default function App() {
                 </AgentLayout>
               </RoleProtectedRoute>
             } />
+            <Route path="/agent/alerts" element={
+              <RoleProtectedRoute allowedRoles={['Agent', 'Administrator']}>
+                <AgentLayout>
+                  <AgentAlertManagement />
+                </AgentLayout>
+              </RoleProtectedRoute>
+            } />
             <Route path="/agent/tickets/:id" element={
               <RoleProtectedRoute allowedRoles={['Agent', 'Administrator']}>
                 <AgentLayout>
@@ -204,6 +213,13 @@ export default function App() {
               <RoleProtectedRoute allowedRoles={['Administrator']}>
                 <AdminLayout>
                   <AdminLeaveManagement />
+                </AdminLayout>
+              </RoleProtectedRoute>
+            } />
+            <Route path="/admin/alerts" element={
+              <RoleProtectedRoute allowedRoles={['Administrator']}>
+                <AdminLayout>
+                  <AdminAlertManagement />
                 </AdminLayout>
               </RoleProtectedRoute>
             } />

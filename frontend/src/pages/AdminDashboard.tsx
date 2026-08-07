@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '../shared/AppContext';
 import { 
   ShieldCheck, 
@@ -11,14 +12,45 @@ import {
   Sparkles,
   CheckCircle,
   XCircle,
-  UserPlus
+  UserPlus,
+  ShieldAlert,
+  AlertTriangle,
+  ExternalLink,
+  CheckCircle2,
 } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
+import { SystemAlert } from '../shared/types';
+import { getAutoDetectedActiveAlerts } from '../shared/api';
 
 export const AdminDashboard: React.FC = () => {
+  const navigate = useNavigate();
   const { currentUser, allUsers, pendingUsers, usersLoading, usersError, stats, approvePendingUser, rejectPendingUser, loadPendingUsers, loadAllUsers } = useApp();
 
   const isAuthorized = currentUser.role === 'Administrator' || currentUser.role === 'Agent';
+
+  // Persistent Active Anomalies state & 30s polling
+  const [activeAnomalies, setActiveAnomalies] = useState<SystemAlert[]>([]);
+  const [anomaliesLoading, setAnomaliesLoading] = useState(false);
+
+  const fetchAnomalies = async () => {
+    try {
+      setAnomaliesLoading(true);
+      const data = await getAutoDetectedActiveAlerts();
+      setActiveAnomalies(data);
+    } catch {
+      // ignore
+    } finally {
+      setAnomaliesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isAuthorized) {
+      fetchAnomalies();
+      const interval = setInterval(fetchAnomalies, 30000); // 30s polling
+      return () => clearInterval(interval);
+    }
+  }, [isAuthorized]);
 
   if (!isAuthorized) {
     return (
@@ -37,14 +69,12 @@ export const AdminDashboard: React.FC = () => {
   // Live user stats derived from backend data
   const activeUsers = allUsers.filter(u => (u.status === 'APPROVED' || u.status === 'ACTIVE') && u.is_active);
   const inactiveUsers = allUsers.filter(u => u.status === 'INACTIVE' || u.status === 'DISABLED' || u.status === 'REJECTED' || (!u.is_active && u.status !== 'PENDING'));
-  const agentCount = allUsers.filter(u => String(u.role).toLowerCase() === 'agent').length;
-  
 
   return (
     <div id="admin-command-center" className="flex-1 bg-zinc-950 p-8 overflow-y-auto h-screen font-sans">
       
       {/* Upper header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
         <div>
           <span className="text-[10px] font-mono tracking-widest uppercase text-zinc-500 flex items-center gap-1.5 font-semibold">
             <Activity className="w-3.5 h-3.5 text-rose-500" />
@@ -62,6 +92,92 @@ export const AdminDashboard: React.FC = () => {
             <span>Sys Uptime: 99.98%</span>
           </div>
         </div>
+      </div>
+
+      {/* Persistent Active Anomalies Banner */}
+      <div className="mb-8 p-5 rounded-2xl bg-zinc-900/60 border border-zinc-800">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            {activeAnomalies.length > 0 ? (
+              <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20 animate-pulse">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+            ) : (
+              <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+            )}
+            <div>
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                <span>Active Category Anomalies</span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                  Auto-Detected ({activeAnomalies.length})
+                </span>
+              </h2>
+              <p className="text-xs text-zinc-400">
+                Real-time automated ticket volume spikes requiring administrative attention. Refreshes every 30s.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => fetchAnomalies()}
+              className="p-2 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white transition-colors"
+              title="Refresh Anomalies"
+            >
+              <RefreshCw className={`w-4 h-4 ${anomaliesLoading ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/admin/alerts')}
+              className="px-3.5 py-2 text-xs font-semibold rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition-all shadow-lg shadow-purple-600/20 flex items-center gap-1.5"
+            >
+              <span>Manage Alerts</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {activeAnomalies.length === 0 ? (
+          <div className="p-4 rounded-xl bg-zinc-950/40 border border-zinc-900 text-xs text-zinc-500 flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>System Normal: No automated ticket volume anomalies currently detected.</span>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {activeAnomalies.map((anomaly) => (
+              <div
+                key={anomaly.id}
+                className="p-4 rounded-xl bg-purple-950/20 border border-purple-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <span className="text-xs font-bold text-purple-200">{anomaly.title}</span>
+                    {anomaly.category && (
+                      <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-semibold uppercase">
+                        {anomaly.category}
+                      </span>
+                    )}
+                    <span className="text-[10px] text-zinc-500 font-mono">
+                      Detected at {new Date(anomaly.createdAt).toLocaleTimeString()}
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-300">{anomaly.message}</p>
+                  {anomaly.recommendation && (
+                    <div className="mt-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px]">
+                      <span className="font-semibold text-amber-400 block text-[10px] uppercase tracking-wider mb-0.5">
+                        ✨ KB Recommended Fix:
+                      </span>
+                      {anomaly.recommendation}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Admin stats widgets */}
@@ -82,171 +198,33 @@ export const AdminDashboard: React.FC = () => {
             <span className="text-[10px] font-mono uppercase">Active Agents Online</span>
             <ShieldCheck className="w-4 h-4 text-indigo-400" />
           </div>
-          <h2 className="text-2xl font-bold text-indigo-400 mt-1.5">{agentCount}</h2>
-          <span className="text-[9px] font-mono text-zinc-500 block mt-1">Agents in database</span>
+          <h2 className="text-2xl font-bold text-white mt-1.5">{allUsers.filter(u => String(u.role).toLowerCase() === 'agent').length}</h2>
+          <span className="text-[9px] font-mono text-zinc-500 block mt-1">
+            IT Service Desk Team
+          </span>
+        </div>
+
+        <div className="p-5 bg-zinc-900/40 border border-zinc-900 rounded-xl">
+          <div className="flex justify-between items-start text-zinc-500">
+            <span className="text-[10px] font-mono uppercase">Pending Approval</span>
+            <UserPlus className="w-4 h-4 text-amber-400" />
+          </div>
+          <h2 className="text-2xl font-bold text-white mt-1.5">{pendingUsers.length}</h2>
+          <span className="text-[9px] font-mono text-zinc-500 block mt-1">
+            Registration requests
+          </span>
         </div>
 
         <div className="p-5 bg-zinc-900/40 border border-zinc-900 rounded-xl">
           <div className="flex justify-between items-start text-zinc-500">
             <span className="text-[10px] font-mono uppercase">Total Tickets</span>
-            <Clock className="w-4 h-4 text-emerald-400" />
+            <Clock className="w-4 h-4 text-rose-400" />
           </div>
-          <h2 className="text-2xl font-bold text-emerald-400 mt-1.5">{stats.totalTickets}</h2>
-          <span className="text-[9px] font-mono text-zinc-500 block mt-1">{stats.openTickets} open · {stats.resolvedTickets} resolved</span>
+          <h2 className="text-2xl font-bold text-white mt-1.5">{stats.totalTickets}</h2>
+          <span className="text-[9px] font-mono text-zinc-500 block mt-1">
+            {stats.openTickets} open · {stats.resolvedTickets} resolved
+          </span>
         </div>
-
-        <div className="p-5 bg-zinc-900/40 border border-zinc-900 rounded-xl">
-          <div className="flex justify-between items-start text-zinc-500">
-            <span className="text-[10px] font-mono uppercase">Pending SLA Breaches</span>
-            <Cpu className="w-4 h-4 text-violet-400" />
-          </div>
-          <h2 className="text-2xl font-bold text-violet-400 mt-1.5">0</h2>
-          <span className="text-[9px] font-mono text-zinc-500 block mt-1">100% compliance target</span>
-        </div>
-      </div>
-
-      {/* Pending User Requests */}
-      <div className="bg-zinc-900/30 border border-zinc-900 p-5 rounded-2xl mb-8">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <UserPlus className="w-4 h-4 text-amber-400" />
-            <h3 className="text-xs font-semibold text-white">Pending User Registration Requests</h3>
-            {pendingUsers.length > 0 && (
-              <span className="px-1.5 py-0.5 bg-amber-500/20 border border-amber-500/30 rounded text-[9px] font-mono text-amber-400 font-semibold">
-                {pendingUsers.length} NEW
-              </span>
-            )}
-          </div>
-          <button
-            onClick={loadPendingUsers}
-            className="p-1.5 hover:bg-zinc-800 rounded-lg transition-colors"
-            title="Refresh"
-          >
-            <RefreshCw className="w-3.5 h-3.5 text-zinc-400 hover:text-white" />
-          </button>
-        </div>
-
-        {pendingUsers.length === 0 ? (
-          <div className="p-6 bg-zinc-950/40 border border-zinc-900/80 rounded-xl text-center">
-            <CheckCircle className="w-6 h-6 text-emerald-400 mx-auto mb-2" />
-            <p className="text-xs text-zinc-500">No pending user requests. All registrations have been processed.</p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {pendingUsers.map(user => (
-              <div
-                key={user.id}
-                className="p-3.5 bg-zinc-950/40 border border-zinc-900/80 rounded-xl flex items-center justify-between gap-4"
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg shrink-0">
-                    <UserPlus className="w-4 h-4 text-amber-400" />
-                  </div>
-                  <div className="min-w-0">
-                    <h5 className="text-[11px] font-bold text-zinc-200 truncate">{user.name}</h5>
-                    <p className="text-[10px] text-zinc-500 truncate">{user.email}</p>
-                    <p className="text-[9px] text-zinc-600 font-mono">
-                      Registered: {new Date(user.createdAt).toLocaleDateString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    onClick={() => approvePendingUser(user.id)}
-                    className="px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 text-emerald-400 rounded-lg text-[10px] font-semibold flex items-center gap-1 transition-all"
-                  >
-                    <CheckCircle className="w-3 h-3" />
-                    <span>Approve</span>
-                  </button>
-                  <button
-                    onClick={() => rejectPendingUser(user.id)}
-                    className="px-3 py-1.5 bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500/20 text-rose-400 rounded-lg text-[10px] font-semibold flex items-center gap-1 transition-all"
-                  >
-                    <XCircle className="w-3 h-3" />
-                    <span>Reject</span>
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Visual Analytics */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-        
-        {/* Departments Load */}
-        <div className="lg:col-span-2 bg-zinc-900/30 border border-zinc-900 p-5 rounded-2xl">
-          <h3 className="text-xs font-semibold text-white mb-2">Organizational Incidents</h3>
-          <p className="text-[10px] text-zinc-500 mb-6">Ticket distribution across open and resolved tickets</p>
-          
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={[
-                { name: 'Open', tickets: stats.openTickets, resolved: 0 },
-                { name: 'In Progress', tickets: stats.ticketsByStatus.in_progress, resolved: 0 },
-                { name: 'Resolved', tickets: 0, resolved: stats.resolvedTickets },
-                { name: 'Closed', tickets: 0, resolved: stats.closedTickets },
-              ]} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <XAxis dataKey="name" stroke="#52525b" fontSize={10} tickLine={false} />
-                <YAxis stroke="#52525b" fontSize={10} tickLine={false} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
-                  labelStyle={{ color: '#a1a1aa', fontSize: '10px' }}
-                  itemStyle={{ color: '#fff', fontSize: '11px' }}
-                />
-                <Bar dataKey="tickets" fill="#6366f1" radius={[4, 4, 0, 0]} name="Active Tickets" />
-                <Bar dataKey="resolved" fill="#10b981" radius={[4, 4, 0, 0]} name="Resolved/Closed" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Database Stats */}
-        <div className="bg-zinc-900/30 border border-zinc-900 p-5 rounded-2xl flex flex-col justify-between">
-          <div>
-            <h3 className="text-xs font-semibold text-white">System Integrations</h3>
-            <p className="text-[10px] text-zinc-500 mb-6">Database, directory, and pipeline synchronization indicators</p>
-          </div>
-
-          <div className="space-y-4">
-            <div className="p-3 bg-zinc-950/60 border border-zinc-900 rounded-xl flex items-center justify-between">
-              <div>
-                <span className="block text-[10px] font-semibold text-zinc-200">MongoDB Database</span>
-                <span className="text-[8px] font-mono text-zinc-500">Primary data store</span>
-              </div>
-              <span className="text-[9px] font-mono text-green-400 bg-green-500/10 px-2 py-0.5 rounded font-semibold">ONLINE</span>
-            </div>
-
-            <div className="p-3 bg-zinc-950/60 border border-zinc-900 rounded-xl flex items-center justify-between">
-              <div>
-                <span className="block text-[10px] font-mono text-zinc-200">Total Users in Database</span>
-                <span className="text-[8px] font-mono text-zinc-500">System records</span>
-              </div>
-              <span className="text-[9px] font-mono text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded font-semibold">{allUsers.length} USERS</span>
-            </div>
-
-            <div className="p-3 bg-zinc-950/60 border border-zinc-900 rounded-xl flex items-center justify-between">
-              <div>
-                <span className="block text-[10px] font-mono text-zinc-200">Total Tickets in Database</span>
-                <span className="text-[8px] font-mono text-zinc-500">Ticket records</span>
-              </div>
-              <span className="text-[9px] font-mono text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded font-semibold">{stats.totalTickets} TICKETS</span>
-            </div>
-          </div>
-
-          <div className="p-3 bg-indigo-500/5 border border-indigo-500/10 rounded-lg text-[9px] text-zinc-400 flex items-center gap-2 mt-4">
-            <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-            <span>All data sourced from MongoDB via live API.</span>
-          </div>
-        </div>
-
       </div>
 
       {/* Priority Distribution */}

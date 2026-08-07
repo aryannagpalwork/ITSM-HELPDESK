@@ -13,7 +13,8 @@ import {
   ChevronRight,
   UserPlus,
   Users,
-  KeyRound
+  KeyRound,
+  Megaphone
 } from 'lucide-react';
 
 export const AdminSidebar: React.FC = () => {
@@ -51,6 +52,11 @@ export const AdminSidebar: React.FC = () => {
       name: 'Leave Management',
       path: '/admin/leaves',
       icon: CalendarDays,
+    },
+    { 
+      name: 'Alert Management',
+      path: '/admin/alerts',
+      icon: Megaphone,
     },
     { 
       name: 'User Management', 

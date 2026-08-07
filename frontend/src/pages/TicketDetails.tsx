@@ -101,7 +101,11 @@ export const TicketDetails: React.FC = () => {
           The incident ticket you are trying to access does not exist or has been removed from the database.
         </p>
         <button
-          onClick={() => navigate('/tickets')}
+          onClick={() => {
+            if (currentUser.role === 'Agent') navigate('/agent/tickets');
+            else if (currentUser.role === 'Administrator') navigate('/admin/tickets');
+            else navigate('/tickets');
+          }}
           className="mt-6 px-4 py-2 bg-card-solid border border-token rounded-lg text-xs font-semibold text-secondary hover-text transition-all cursor-pointer"
         >
           Return to Queue
@@ -158,7 +162,10 @@ export const TicketDetails: React.FC = () => {
   const handleDelete = () => {
     if (confirm('Are you absolutely sure you want to permanently delete this support incident?')) {
       deleteTicket(ticket.id);
-      navigate('/tickets');
+      // Return to role-specific ticket queue
+      if (currentUser.role === 'Agent') navigate('/agent/tickets');
+      else if (currentUser.role === 'Administrator') navigate('/admin/tickets');
+      else navigate('/tickets');
     }
   };
 
@@ -449,7 +456,12 @@ export const TicketDetails: React.FC = () => {
         {/* Top Back Link & Delete Header */}
         <div className="flex items-center justify-between mb-6">
           <button
-            onClick={() => navigate('/tickets')}
+              onClick={() => {
+                // Navigate back to the appropriate tickets list based on role
+                if (currentUser.role === 'Agent') navigate('/agent/tickets');
+                else if (currentUser.role === 'Administrator') navigate('/admin/tickets');
+                else navigate('/tickets');
+              }}
             className="text-xs font-semibold text-secondary hover-text flex items-center space-x-2.5 transition-all cursor-pointer group"
           >
             <ArrowLeft className="w-4 h-4 transition-transform group-hover:-translate-x-1" />

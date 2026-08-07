@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../shared/AppContext';
 import { 
@@ -24,7 +24,17 @@ import { TicketPriority, TicketStatus } from '../shared/types';
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
-  const { currentUser, tickets, createTicket, stats } = useApp();
+  const { currentUser, tickets, createTicket, stats, loadTickets } = useApp();
+
+  // Auto-refresh tickets every 30 seconds so resolved tickets are reflected
+  // without requiring a manual page reload (e.g. when an agent resolves a ticket).
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadTickets();
+    }, 30_000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   
   // Create Ticket State (Modal form)
   const [isCreateOpen, setIsCreateOpen] = useState(false);

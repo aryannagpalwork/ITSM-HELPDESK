@@ -35,6 +35,8 @@ class Settings(BaseModel):
     graph_client_id: str = Field(default="")
     graph_client_secret: str = Field(default="")
     graph_mailbox: str = Field(default="")
+    alert_ticket_threshold: int = Field(default=5)
+    alert_window_minutes: int = Field(default=60)
 
 
 def _get_bool(name: str, default: bool) -> bool:
@@ -93,4 +95,6 @@ def get_settings() -> Settings:
         graph_client_id=os.getenv("GRAPH_CLIENT_ID", ""),
         graph_client_secret=os.getenv("GRAPH_CLIENT_SECRET", ""),
         graph_mailbox=os.getenv("GRAPH_MAILBOX", ""),
+        alert_ticket_threshold=int(os.getenv("ALERT_TICKET_THRESHOLD", "5")),
+        alert_window_minutes=int(os.getenv("ALERT_WINDOW_MINUTES", "60")),
     )
