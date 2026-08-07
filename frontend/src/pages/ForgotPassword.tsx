@@ -110,6 +110,8 @@ export const ForgotPassword: React.FC = () => {
             <label className="block text-[11px] font-mono uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Corporate Email</label>
             <div className="relative">
               <input
+                id="forgot-password-email"
+                name="email"
                 type="email"
                 placeholder="name@company.com"
                 value={email}

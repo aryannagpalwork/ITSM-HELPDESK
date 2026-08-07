@@ -140,6 +140,12 @@ class ChatResponse(ORMBase):
     session_id: str | None = None
     suggested_ticket: dict | None = None
     satisfaction_card: SatisfactionCard | None = None
+    # Optional guided-troubleshooting fields. Existing clients can ignore these.
+    diagnostic_question: str | None = None
+    guided_actions: list[str] = []
+    guided_state: str | None = None
+    ticket_id: str | None = None
+    ticket_number: str | None = None
 
 
 class EscalateToTicketRequest(ORMBase):

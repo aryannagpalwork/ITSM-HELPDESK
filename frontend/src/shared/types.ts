@@ -37,6 +37,9 @@ export interface Ticket {
   aiSummary?: string;
   suggestedResolution?: string;
   resolution?: string;
+  resolvedBy?: string;
+  resolutionSource?: string;
+  aiResolved?: boolean;
   createdAt: string;
   updatedAt: string;
   
@@ -185,6 +188,11 @@ export interface ChatResponse {
   session_id: string | null;
   suggested_ticket: any; // Or define GeneratedTicketDetails type if needed
   satisfaction_card: SatisfactionCard | null;
+  diagnostic_question?: string | null;
+  guided_actions?: string[];
+  guided_state?: string | null;
+  ticket_id?: string | null;
+  ticket_number?: string | null;
 }
 
 export interface ChatMessage {

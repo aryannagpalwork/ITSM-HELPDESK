@@ -80,6 +80,19 @@ class TextExtractor(ABC):
         
         # Normalize line endings
         text = text.replace("\r\n", "\n").replace("\r", "\n")
+        # Remove common extraction artifacts before chunking. Consecutive
+        # duplicate lines are frequently produced by OCR/PDF text layers;
+        # preserving the first occurrence keeps document structure intact.
+        text = text.replace("\x00", "").replace("\f", "\n")
+        cleaned_lines: list[str] = []
+        previous_line = None
+        for line in text.split("\n"):
+            normalized_line = re.sub(r"[ \t]+", " ", line).strip()
+            if normalized_line and normalized_line == previous_line:
+                continue
+            cleaned_lines.append(normalized_line)
+            previous_line = normalized_line if normalized_line else previous_line
+        text = "\n".join(cleaned_lines)
         
         # Remove excessive whitespace
         text = re.sub(r"\n{3,}", "\n\n", text)

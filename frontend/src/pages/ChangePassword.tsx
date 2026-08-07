@@ -67,6 +67,8 @@ export const ChangePassword: React.FC = () => {
               <label className="block text-[11px] font-mono uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Current password</label>
               <div className="relative">
                 <input
+                  id="current-password"
+                  name="currentPassword"
                   type="password"
                   value={currentPassword}
                   onChange={(e) => { setCurrentPassword(e.target.value); setError(''); }}
@@ -84,6 +86,8 @@ export const ChangePassword: React.FC = () => {
               <label className="block text-[11px] font-mono uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>New password</label>
               <div className="relative">
                 <input
+                  id="new-password"
+                  name="newPassword"
                   type="password"
                   value={newPassword}
                   onChange={(e) => { setNewPassword(e.target.value); setError(''); }}
@@ -101,6 +105,8 @@ export const ChangePassword: React.FC = () => {
               <label className="block text-[11px] font-mono uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Confirm new password</label>
               <div className="relative">
                 <input
+                  id="confirm-password"
+                  name="confirmPassword"
                   type="password"
                   value={confirmPassword}
                   onChange={(e) => { setConfirmPassword(e.target.value); setError(''); }}

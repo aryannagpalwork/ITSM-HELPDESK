@@ -83,10 +83,10 @@ export const TicketDashboard: React.FC = () => {
 
   // Filter logic
   const filteredTickets = tickets.filter(ticket => {
-    // Role isolation
-    if (currentUser.role === 'Employee' && ticket.userId !== currentUser.id) {
-      return false;
-    }
+    // Employee ownership is enforced by the backend ticket-list endpoint.
+    // Do not apply a second client-side ID comparison here: legacy AI-resolved
+    // tickets may be owned through their AI conversation link instead of the
+    // original created_by field.
 
     // Search query match
     const ticketDisplayId = ticket.ticketNumber || ticket.id;
@@ -97,7 +97,8 @@ export const TicketDashboard: React.FC = () => {
       (ticket.userName && ticket.userName.toLowerCase().includes(search.toLowerCase()));
 
     // Status filter match
-    const matchesStatus = statusFilter === 'all' || ticket.status === statusFilter;
+    const matchesStatus = statusFilter === 'all'
+      || (statusFilter === 'resolved_ai' ? ticket.aiResolved === true : ticket.status === statusFilter);
 
     // Priority filter match
     const matchesPriority = priorityFilter === 'all' || ticket.priority === priorityFilter;
@@ -220,6 +221,8 @@ export const TicketDashboard: React.FC = () => {
           {/* Text Search */}
           <div className="relative flex items-center">
             <input 
+              id="ticket-search"
+              name="ticketSearch"
               type="text" 
               placeholder="Search by ID, title, requester..."
               value={search}
@@ -233,6 +236,8 @@ export const TicketDashboard: React.FC = () => {
           <div className="flex items-center space-x-2 bg-input border border-token rounded-lg px-2.5 py-1">
             <span className="text-[10px] font-mono uppercase text-tertiary shrink-0">Status:</span>
             <select
+              id="ticket-status-filter"
+              name="ticketStatus"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               className="w-full bg-transparent border-none text-xs text-secondary focus:ring-0 focus:outline-none outline-none py-1 cursor-pointer"
@@ -242,6 +247,7 @@ export const TicketDashboard: React.FC = () => {
               <option value="in_progress">In Progress</option>
               <option value="resolved">Resolved</option>
               <option value="closed">Closed</option>
+              {currentUser.role === 'Administrator' && <option value="resolved_ai">Resolved by AI</option>}
             </select>
           </div>
 
@@ -249,6 +255,8 @@ export const TicketDashboard: React.FC = () => {
           <div className="flex items-center space-x-2 bg-input border border-token rounded-lg px-2.5 py-1">
             <span className="text-[10px] font-mono uppercase text-tertiary shrink-0">Priority:</span>
             <select
+              id="ticket-priority-filter"
+              name="ticketPriority"
               value={priorityFilter}
               onChange={(e) => setPriorityFilter(e.target.value)}
               className="w-full bg-transparent border-none text-xs text-secondary focus:ring-0 focus:outline-none outline-none py-1 cursor-pointer"
@@ -265,6 +273,8 @@ export const TicketDashboard: React.FC = () => {
           <div className="flex items-center space-x-2 bg-input border border-token rounded-lg px-2.5 py-1">
             <span className="text-[10px] font-mono uppercase text-tertiary shrink-0">Order:</span>
             <select
+              id="ticket-sort-order"
+              name="ticketSort"
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value)}
               className="w-full bg-transparent border-none text-xs text-secondary focus:ring-0 focus:outline-none outline-none py-1 cursor-pointer"
@@ -324,6 +334,16 @@ export const TicketDashboard: React.FC = () => {
                   <span className={`text-[9px] font-mono uppercase px-2 py-0.5 rounded-md font-semibold ${getStatusStyle(ticket.status)}`}>
                     {ticket.status}
                   </span>
+                  {ticket.aiResolved && (
+                    <span className="text-[9px] font-mono uppercase px-2 py-0.5 rounded-md font-semibold bg-violet-500/10 text-violet-300 border border-violet-500/25">
+                      Resolved by AI
+                    </span>
+                  )}
+                  {!ticket.aiResolved && (ticket.status === 'resolved' || ticket.status === 'closed') && ticket.resolvedBy && (
+                    <span className="text-[9px] font-mono uppercase px-2 py-0.5 rounded-md font-semibold bg-sky-500/10 text-sky-300 border border-sky-500/25">
+                      Resolved by {ticket.resolvedBy}
+                    </span>
+                  )}
                   <span className="text-[10px] font-mono text-tertiary">•</span>
                   <span className="text-[10px] text-secondary font-medium">Department: {ticket.departmentName}</span>
                   {ticket.assignedTeam && (
@@ -391,6 +411,8 @@ export const TicketDashboard: React.FC = () => {
               <div>
                 <label className="block text-[10px] font-mono uppercase tracking-wider text-tertiary mb-1">Issue Headline</label>
                 <input 
+                  id="new-ticket-title"
+                  name="title"
                   type="text" 
                   placeholder="e.g. Corporate Wi-Fi connection issues on Windows laptop"
                   required
@@ -403,6 +425,8 @@ export const TicketDashboard: React.FC = () => {
               <div>
                 <label className="block text-[10px] font-mono uppercase tracking-wider text-tertiary mb-1">Full Technical Description</label>
                 <textarea 
+                  id="new-ticket-description"
+                  name="description"
                   placeholder="Provide details about error prompts, software versions, and what troubleshooting steps you have already attempted..."
                   rows={4}
                   required

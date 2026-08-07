@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '../shared/AppContext';
-import { AgentAvailability, TicketPriority, TicketStatus } from '../shared/types';
+import { AgentAvailability, Ticket, TicketPriority, TicketStatus } from '../shared/types';
 import {
   Sparkles,
   ArrowLeft,
@@ -22,7 +22,7 @@ import {
   Loader2,
   Check,
 } from 'lucide-react';
-import { AuditLog, getAgentsAvailability } from '../shared/api';
+import { AuditLog, getAgentsAvailability, getTicket } from '../shared/api';
 
 export const TicketDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -62,8 +62,22 @@ export const TicketDetails: React.FC = () => {
     assignedTo: null,
   });
   const [agents, setAgents] = useState<AgentAvailability[]>([]);
+  const [fetchedTicket, setFetchedTicket] = useState<Ticket | null>(null);
 
-  const ticket = tickets.find((t) => t.id === id);
+  const ticket = tickets.find((t) => t.id === id) || fetchedTicket;
+
+  useEffect(() => {
+    if (ticket || !id) return;
+    let active = true;
+    getTicket(id)
+      .then((loaded) => {
+        if (active) setFetchedTicket(loaded);
+      })
+      .catch(() => {
+        if (active) setFetchedTicket(null);
+      });
+    return () => { active = false; };
+  }, [id, ticket?.id]);
 
   useEffect(() => {
     if (ticket) {
@@ -339,6 +353,8 @@ export const TicketDetails: React.FC = () => {
                     Resolution Note (optional)
                   </label>
                   <textarea
+                    id="ticket-resolution"
+                    name="resolution"
                     value={modalData.resolution}
                     onChange={(e) => setModalData({ ...modalData, resolution: e.target.value })}
                     placeholder="Describe how the issue was resolved..."
@@ -358,6 +374,8 @@ export const TicketDetails: React.FC = () => {
                     </div>
                   ) : (
                     <select
+                      id="ticket-assignee"
+                      name="assignedTo"
                       value={modalData.assignedTo || ''}
                       onChange={(e) => setModalData({ ...modalData, assignedTo: e.target.value || null })}
                       className="w-full input-token rounded-lg p-2.5 text-xs outline-none cursor-pointer"
@@ -397,6 +415,8 @@ export const TicketDetails: React.FC = () => {
                   Reason {isReasonRequired(modal.action) ? '(required)' : '(optional)'}
                 </label>
                 <textarea
+                  id="ticket-action-reason"
+                  name="reason"
                   value={modalData.reason}
                   onChange={(e) => setModalData({ ...modalData, reason: e.target.value })}
                   placeholder={`Enter reason for ${modal.action}...`}
@@ -719,6 +739,8 @@ export const TicketDetails: React.FC = () => {
                   <span className="block text-[10px] font-mono text-tertiary uppercase mb-1.5">Current Status</span>
                   {canEditMetadata ? (
                     <select
+                      id="ticket-status"
+                      name="status"
                       value={ticket.status}
                       onChange={(e) => handleStatusChange(e.target.value as TicketStatus)}
                       className="w-full input-token rounded-lg p-2.5 text-xs outline-none cursor-pointer"
@@ -753,11 +775,26 @@ export const TicketDetails: React.FC = () => {
                   )}
                 </div>
 
+                {(ticket.status === 'resolved' || ticket.status === 'closed') && (
+                  <div>
+                    <span className="block text-[10px] font-mono text-tertiary uppercase mb-1.5">Resolution Source</span>
+                    <span className={`inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-md uppercase font-mono ${
+                      ticket.aiResolved
+                        ? 'bg-violet-500/10 text-violet-300 border border-violet-500/25'
+                        : 'bg-sky-500/10 text-sky-300 border border-sky-500/25'
+                    }`}>
+                      {ticket.aiResolved ? 'Resolved by AI' : `Resolved by ${ticket.resolvedBy || 'IT Agent'}`}
+                    </span>
+                  </div>
+                )}
+
                 {/* Priority Selector */}
                 <div>
                   <span className="block text-[10px] font-mono text-tertiary uppercase mb-1.5">SLA Severity</span>
                   {canEditMetadata ? (
                     <select
+                      id="ticket-priority"
+                      name="priority"
                       value={ticket.priority}
                       onChange={(e) => handlePriorityChange(e.target.value as TicketPriority)}
                       className="w-full input-token rounded-lg p-2.5 text-xs outline-none cursor-pointer"
@@ -932,6 +969,8 @@ export const TicketDetails: React.FC = () => {
         <form onSubmit={handleSubmitComment} className="space-y-3 max-w-4xl">
           <div className="bg-card border border-token rounded-2xl p-1.5 flex items-center focus-within:border-[var(--accent-primary)] transition-colors">
             <input
+              id="ticket-comment"
+              name="comment"
               type="text"
               placeholder={isInternalComment ? "Add a private internal technician note..." : "Post a response to the requester..."}
               value={commentInput}

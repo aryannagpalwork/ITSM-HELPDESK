@@ -515,6 +515,8 @@ export const EmployeeDashboard: React.FC = () => {
             <div className="relative flex items-center">
               <Search className="absolute left-2.5 w-3 h-3 text-tertiary" />
               <input 
+                id="employee-ticket-search"
+                name="ticketSearch"
                 type="text" 
                 placeholder="Search tickets..."
                 value={search}
@@ -526,6 +528,8 @@ export const EmployeeDashboard: React.FC = () => {
             <div className="flex items-center space-x-1.5 bg-input border border-token rounded-lg px-2 py-1">
               <span className="text-[8px] font-mono uppercase text-tertiary shrink-0">Status</span>
               <select 
+                id="employee-status-filter"
+                name="ticketStatus"
                 value={statusFilter} 
                 onChange={(e) => setStatusFilter(e.target.value)}
                 className="w-full bg-transparent border-none text-[10px] text-secondary focus:ring-0 outline-none py-0.5 cursor-pointer"
@@ -541,6 +545,8 @@ export const EmployeeDashboard: React.FC = () => {
             <div className="flex items-center space-x-1.5 bg-input border border-token rounded-lg px-2 py-1">
               <span className="text-[8px] font-mono uppercase text-tertiary shrink-0">Priority</span>
               <select 
+                id="employee-priority-filter"
+                name="ticketPriority"
                 value={priorityFilter} 
                 onChange={(e) => setPriorityFilter(e.target.value)}
                 className="w-full bg-transparent border-none text-[10px] text-secondary focus:ring-0 outline-none py-0.5 cursor-pointer"
@@ -556,6 +562,8 @@ export const EmployeeDashboard: React.FC = () => {
             <div className="flex items-center space-x-1.5 bg-input border border-token rounded-lg px-2 py-1">
               <span className="text-[8px] font-mono uppercase text-tertiary shrink-0">Category</span>
               <select 
+                id="employee-category-filter"
+                name="ticketCategory"
                 value={categoryFilter} 
                 onChange={(e) => setCategoryFilter(e.target.value)}
                 className="w-full bg-transparent border-none text-[10px] text-secondary focus:ring-0 outline-none py-0.5 cursor-pointer"
@@ -783,6 +791,8 @@ export const EmployeeDashboard: React.FC = () => {
               <div>
                 <label className="block text-[10px] font-mono uppercase tracking-wider text-tertiary mb-1">Title</label>
                 <input 
+                  id="employee-new-ticket-title"
+                  name="title"
                   type="text" 
                   placeholder="e.g., Cannot authenticate via Okta on Macbook"
                   required
@@ -794,6 +804,8 @@ export const EmployeeDashboard: React.FC = () => {
               <div>
                 <label className="block text-[10px] font-mono uppercase tracking-wider text-tertiary mb-1">Description</label>
                 <textarea 
+                  id="employee-new-ticket-description"
+                  name="description"
                   placeholder="Explain what happened, what device you are using, and what steps you have tried..."
                   rows={4}
                   required

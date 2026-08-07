@@ -177,6 +177,11 @@ def _ai_conversation_is_resolved(conversation: dict) -> bool:
 
 
 def _ai_conversation_is_escalated(conversation: dict) -> bool:
+    # An AI-resolved ticket is a historical/reporting record, not a human
+    # escalation. It must not reduce AI resolution counts or inflate AI
+    # escalated counts merely because it has a ticket_id.
+    if conversation.get("resolved_by_ai") is True or str(conversation.get("resolution_source") or "").lower() == "ai":
+        return False
     if conversation.get("escalated") is True:
         return True
     status = str(conversation.get("conversation_status") or "").upper()

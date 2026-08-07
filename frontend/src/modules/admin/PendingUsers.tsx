@@ -20,6 +20,8 @@ import {
   UserCog,
   Plus,
   X,
+  Copy,
+  Check,
 } from 'lucide-react';
 
 type UserTab = 'pending' | 'active' | 'inactive' | 'all';
@@ -71,6 +73,7 @@ export const AdminPendingUsers: React.FC = () => {
   const [formPasswordAutoGen, setFormPasswordAutoGen] = useState(true);
   const [formError, setFormError] = useState('');
   const [formLoading, setFormLoading] = useState(false);
+  const [createdCredentials, setCreatedCredentials] = useState<{ email: string; password: string } | null>(null);
 
   const isAuthorized = currentUser.role === 'Administrator';
 
@@ -149,10 +152,7 @@ const resetForm = () => {
         formPasswordAutoGen ? undefined : formPassword.trim()
       );
       closeModal();
-      // Show success alert with the password
-      setTimeout(() => {
-        alert(`User created successfully!\n\nEmail: ${formEmail.trim()}\nPassword: ${generatedPassword}\n\nPlease share these credentials with the user.`);
-      }, 300);
+      setCreatedCredentials({ email: formEmail.trim(), password: generatedPassword });
     } catch (err: unknown) {
       setFormError(extractApiError(err) || 'Failed to create user.');
     } finally {
@@ -754,6 +754,77 @@ const resetForm = () => {
           </div>
         </div>
       )}
+
+      {createdCredentials && (
+        <CredentialSuccessModal
+          email={createdCredentials.email}
+          password={createdCredentials.password}
+          onClose={() => setCreatedCredentials(null)}
+        />
+      )}
     </div>
   );
 };
+
+const CredentialSuccessModal: React.FC<{
+  email: string;
+  password: string;
+  onClose: () => void;
+}> = ({ email, password, onClose }) => {
+  const [copied, setCopied] = useState<'email' | 'password' | 'all' | null>(null);
+  const credentials = `Email: ${email}\nPassword: ${password}`;
+
+  const copy = async (value: string, target: 'email' | 'password' | 'all') => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(target);
+      window.setTimeout(() => setCopied(current => current === target ? null : current), 1600);
+    } catch {
+      setCopied(null);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-md overflow-hidden rounded-2xl border border-token-strong bg-card-solid shadow-2xl">
+        <div className="flex items-start justify-between border-b border-token px-6 py-5">
+          <div>
+            <h3 className="text-sm font-bold text-primary">User created successfully</h3>
+            <p className="mt-1 text-[11px] text-secondary">Copy and securely share these credentials with the user.</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-1.5 hover-elev" aria-label="Close credential dialog">
+            <X className="h-4 w-4 text-secondary" />
+          </button>
+        </div>
+        <div className="space-y-3 p-6">
+          <CredentialRow label="Email" value={email} copied={copied === 'email'} onCopy={() => copy(email, 'email')} />
+          <CredentialRow label="Password" value={password} copied={copied === 'password'} onCopy={() => copy(password, 'password')} />
+          <button type="button" onClick={() => copy(credentials, 'all')} className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-token px-3 py-2 text-[11px] font-semibold text-secondary transition-colors hover-elev">
+            {copied === 'all' ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+            {copied === 'all' ? 'Copied credentials' : 'Copy all credentials'}
+          </button>
+        </div>
+        <div className="flex justify-end border-t border-token px-6 py-4">
+          <button type="button" onClick={onClose} className="rounded-lg accent-btn px-4 py-2 text-xs font-semibold">Done</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const CredentialRow: React.FC<{
+  label: string;
+  value: string;
+  copied: boolean;
+  onCopy: () => void;
+}> = ({ label, value, copied, onCopy }) => (
+  <div className="flex items-center gap-3 rounded-xl border border-token bg-card px-3 py-2.5">
+    <div className="min-w-0 flex-1">
+      <p className="text-[9px] font-mono uppercase tracking-wider text-tertiary">{label}</p>
+      <p className="mt-1 truncate text-xs font-medium text-primary select-text">{value}</p>
+    </div>
+    <button type="button" onClick={onCopy} className="shrink-0 rounded-lg border border-token p-2 text-secondary hover-elev" aria-label={`Copy ${label}`}>
+      {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
+  </div>
+);

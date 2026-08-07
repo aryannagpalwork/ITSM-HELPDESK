@@ -598,6 +598,8 @@ export const AgentDashboard: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2 mb-4">
           <div className="relative flex items-center lg:col-span-2">
             <input 
+              id="agent-ticket-search"
+              name="ticketSearch"
               type="text" 
               placeholder="Search tickets..."
               value={search}
@@ -619,7 +621,7 @@ export const AgentDashboard: React.FC = () => {
             style={{ backgroundColor: tokens.inputBg, border: `1px solid ${tokens.border}` }}
           >
             <span className="text-[8px] font-mono uppercase shrink-0" style={{ color: tokens.textTertiary }}>Status</span>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+            <select id="agent-status-filter" name="ticketStatus" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
               className="w-full bg-transparent border-none text-[10px] focus:ring-0 outline-none py-0.5 cursor-pointer"
               style={{ color: tokens.textSecondary }}
             >
@@ -636,7 +638,7 @@ export const AgentDashboard: React.FC = () => {
             style={{ backgroundColor: tokens.inputBg, border: `1px solid ${tokens.border}` }}
           >
             <span className="text-[8px] font-mono uppercase shrink-0" style={{ color: tokens.textTertiary }}>Priority</span>
-            <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)}
+            <select id="agent-priority-filter" name="ticketPriority" value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)}
               className="w-full bg-transparent border-none text-[10px] focus:ring-0 outline-none py-0.5 cursor-pointer"
               style={{ color: tokens.textSecondary }}
             >
@@ -653,7 +655,7 @@ export const AgentDashboard: React.FC = () => {
             style={{ backgroundColor: tokens.inputBg, border: `1px solid ${tokens.border}` }}
           >
             <span className="text-[8px] font-mono uppercase shrink-0" style={{ color: tokens.textTertiary }}>Assignment</span>
-            <select value={assignmentFilter} onChange={(e) => setAssignmentFilter(e.target.value)}
+            <select id="agent-assignment-filter" name="assignment" value={assignmentFilter} onChange={(e) => setAssignmentFilter(e.target.value)}
               className="w-full bg-transparent border-none text-[10px] focus:ring-0 outline-none py-0.5 cursor-pointer"
               style={{ color: tokens.textSecondary }}
             >
@@ -667,7 +669,7 @@ export const AgentDashboard: React.FC = () => {
             style={{ backgroundColor: tokens.inputBg, border: `1px solid ${tokens.border}` }}
           >
             <span className="text-[8px] font-mono uppercase shrink-0" style={{ color: tokens.textTertiary }}>Sort</span>
-            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}
+            <select id="agent-sort-order" name="ticketSort" value={sortBy} onChange={(e) => setSortBy(e.target.value)}
               className="w-full bg-transparent border-none text-[10px] focus:ring-0 outline-none py-0.5 cursor-pointer"
               style={{ color: tokens.textSecondary }}
             >
@@ -808,6 +810,8 @@ export const AgentDashboard: React.FC = () => {
               <div>
                 <label className="block text-[10px] font-mono uppercase tracking-wider mb-1" style={{ color: tokens.textTertiary }}>Incident Headline</label>
                 <input 
+                  id="agent-new-ticket-title"
+                  name="title"
                   type="text" 
                   placeholder="e.g., Cannot authenticate via Okta on Macbook"
                   required
@@ -822,6 +826,8 @@ export const AgentDashboard: React.FC = () => {
               <div>
                 <label className="block text-[10px] font-mono uppercase tracking-wider mb-1" style={{ color: tokens.textTertiary }}>Full Description</label>
                 <textarea 
+                  id="agent-new-ticket-description"
+                  name="description"
                   placeholder="Explain what happened..."
                   rows={4}
                   required
