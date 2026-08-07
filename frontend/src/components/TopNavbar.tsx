@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ChevronDown, LogOut, KeyRound, UserCircle2 } from 'lucide-react';
 import { useApp } from '../shared/AppContext';
 import { ThemeSelector } from '../shared/ThemeSelector';
+import { NotificationCenter } from './NotificationCenter';
 
 /**
  * Global top navbar rendered on every authenticated page (inside each role
@@ -55,6 +56,7 @@ export const TopNavbar: React.FC<{ title?: string }> = ({ title }) => {
       </div>
 
       <div className="flex items-center gap-3">
+        {currentUser.role !== 'Administrator' && <NotificationCenter />}
         <ThemeSelector />
         <div className="relative" ref={menuRef}>
           <button

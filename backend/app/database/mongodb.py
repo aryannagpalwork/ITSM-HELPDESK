@@ -79,6 +79,15 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
         IndexModel([("category", ASCENDING)]),
         IndexModel([("assigned_to", ASCENDING), ("status", ASCENDING)]),
     ])
+    await db.alerts.create_indexes([
+        IndexModel([("status", ASCENDING)]),
+    ])
+    await db.notifications.create_indexes([
+        IndexModel([("user_id", ASCENDING), ("read", ASCENDING)]),
+    ])
+    await db.ticket_feedback.create_indexes([
+        IndexModel([("ticket_id", ASCENDING)], unique=True),
+    ])
 
 
 async def reconcile_agent_workloads(db: AsyncIOMotorDatabase) -> None:

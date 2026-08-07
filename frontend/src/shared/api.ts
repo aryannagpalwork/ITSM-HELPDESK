@@ -16,6 +16,8 @@ import {
   LeaveRequest,
   AgentAvailability,
   CurrentlyOnLeave,
+  SystemAlert,
+  UserNotification,
 } from './types';
 // Use the browser's host by default so the UI also works when opened through
 // localhost, a LAN address, or another development hostname. Set
@@ -1315,4 +1317,141 @@ export const getAdminAnalytics = async (month: number, year: number): Promise<Ad
     throw new Error(`Unable to fetch admin analytics: ${response.status}`);
   }
   return await response.json();
+};
+
+// ── Alerts & Notifications API ──
+
+const mapAlertItem = (item: any): SystemAlert => ({
+  id: item.id,
+  title: item.title,
+  message: item.message,
+  recommendation: item.recommendation,
+  source: item.source,
+  category: item.category,
+  status: item.status,
+  createdBy: item.created_by,
+  createdAt: item.created_at,
+  resolvedBy: item.resolved_by,
+  resolvedAt: item.resolved_at,
+  ticketCount: item.ticket_count,
+  relatedTicketIds: item.related_ticket_ids,
+  windowStart: item.window_start,
+  windowEnd: item.window_end,
+});
+
+const mapNotificationItem = (item: any): UserNotification => ({
+  id: item.id,
+  userId: item.user_id,
+  type: item.type,
+  title: item.title,
+  message: item.message,
+  ticketId: item.ticket_id,
+  alertId: item.alert_id,
+  read: item.read,
+  createdAt: item.created_at,
+});
+
+export const getActiveAlerts = async (): Promise<SystemAlert[]> => {
+  const response = await apiFetch(`${API_BASE_URL}/alerts/active`);
+  if (!response.ok) {
+    throw new Error(`Unable to fetch active alerts: ${response.status}`);
+  }
+  const data = await response.json();
+  return data.map(mapAlertItem);
+};
+
+export const getAllAlerts = async (): Promise<SystemAlert[]> => {
+  const response = await apiFetch(`${API_BASE_URL}/alerts`);
+  if (!response.ok) {
+    throw new Error(`Unable to fetch alert history: ${response.status}`);
+  }
+  const data = await response.json();
+  return data.map(mapAlertItem);
+};
+
+export const createAlert = async (payload: { title: string; message: string; category?: string }): Promise<SystemAlert> => {
+  const response = await apiFetch(`${API_BASE_URL}/alerts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const errorMsg = await extractErrorFromResponse(response);
+    throw new Error(errorMsg);
+  }
+  const item = await response.json();
+  return mapAlertItem(item);
+};
+
+export const resolveAlert = async (alertId: string): Promise<SystemAlert> => {
+  const response = await apiFetch(`${API_BASE_URL}/alerts/${alertId}/resolve`, {
+    method: 'PATCH',
+  });
+  if (!response.ok) {
+    const errorMsg = await extractErrorFromResponse(response);
+    throw new Error(errorMsg);
+  }
+  const item = await response.json();
+  return mapAlertItem(item);
+};
+
+export const getMyNotifications = async (): Promise<UserNotification[]> => {
+  const response = await apiFetch(`${API_BASE_URL}/notifications`);
+  if (!response.ok) {
+    throw new Error(`Unable to fetch notifications: ${response.status}`);
+  }
+  const data = await response.json();
+  return data.map(mapNotificationItem);
+};
+
+export const getUnreadNotificationsCount = async (): Promise<number> => {
+  const response = await apiFetch(`${API_BASE_URL}/notifications/unread-count`);
+  if (!response.ok) {
+    return 0;
+  }
+  const data = await response.json();
+  return data.unread_count || 0;
+};
+
+export const markNotificationRead = async (notifId: string): Promise<UserNotification> => {
+  const response = await apiFetch(`${API_BASE_URL}/notifications/${notifId}/read`, {
+    method: 'PATCH',
+  });
+  if (!response.ok) {
+    const errorMsg = await extractErrorFromResponse(response);
+    throw new Error(errorMsg);
+  }
+  const item = await response.json();
+  return mapNotificationItem(item);
+};
+
+export const getAutoDetectedActiveAlerts = async (): Promise<SystemAlert[]> => {
+  const response = await apiFetch(`${API_BASE_URL}/alerts?status=active&source=auto_detected`);
+  if (!response.ok) {
+    throw new Error(`Unable to fetch active anomaly alerts: ${response.status}`);
+  }
+  const data = await response.json();
+  return data.map(mapAlertItem);
+};
+
+export const clearAlertHistory = async (): Promise<number> => {
+  const response = await apiFetch(`${API_BASE_URL}/alerts/history`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    const errorMsg = await extractErrorFromResponse(response);
+    throw new Error(errorMsg);
+  }
+  const data = await response.json();
+  return data.deleted_count || 0;
+};
+
+export const markAllNotificationsRead = async (): Promise<void> => {
+  const response = await apiFetch(`${API_BASE_URL}/notifications/read-all`, {
+    method: 'PATCH',
+  });
+  if (!response.ok) {
+    const errorMsg = await extractErrorFromResponse(response);
+    throw new Error(errorMsg);
+  }
 };

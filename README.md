@@ -42,6 +42,25 @@ This repository contains a production-ready enterprise IT service management (IT
 - ✅ Ticket Dashboard
 - ✅ Ticket Details Page
 
+### Recent Alert System Updates
+- Fixed duplicate auto-detected alert generation in the backend.
+- Added a dedicated **Agent Alert Center** page for agent-specific alerts.
+- Removed alert notifications from the admin bell and kept ticket notifications for agents only.
+- Updated agent-created ticket notification text to say: "Ticket has been created."
+
+#### Files Added / Updated
+- Added `frontend/src/pages/AgentAlertManagement.tsx`
+- Added `backend/tests/test_ticket_assignment_notifications.py`
+- Updated `backend/app/services/anomaly_scheduler.py`
+- Updated `backend/tests/test_anomaly_scheduler.py`
+- Updated `frontend/src/modules/agent/Sidebar.tsx`
+- Updated `frontend/src/App.tsx`
+- Updated `frontend/src/components/NotificationCenter.tsx`
+- Updated `frontend/src/components/TopNavbar.tsx`
+- Updated `backend/app/services/tickets.py`
+- Updated `ALERTS_UI_CHANGELOG.md`
+- Updated `README.md`
+
 ## Tech Stack
 
 ### Backend

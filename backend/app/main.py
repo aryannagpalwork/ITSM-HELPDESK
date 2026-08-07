@@ -9,6 +9,7 @@ from app.config.logging import configure_logging
 from app.config.settings import get_settings
 from app.database.mongodb import get_database, close_connection, ensure_indexes, reconcile_agent_workloads
 from app.database.seed import seed_demo_data
+from app.services.anomaly_scheduler import start_scheduler, stop_scheduler
 
 settings = get_settings()
 configure_logging(settings)
@@ -29,7 +30,9 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("Error seeding demo data: %s", e, exc_info=True)
     
+    start_scheduler()
     yield
+    stop_scheduler()
     await close_connection()
     logger.info("Stopping %s", settings.app_name)
 

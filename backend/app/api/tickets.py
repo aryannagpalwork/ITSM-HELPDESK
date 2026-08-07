@@ -334,3 +334,89 @@ async def delete_ticket_endpoint(
     """Delete a ticket and its comments."""
     await delete_ticket(db, ticket_id, current_user["id"], reason)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+class TicketFeedbackCreate(BaseModel):
+    rating: int = Field(..., ge=1, le=5)
+    comment: Optional[str] = None
+
+
+class TicketFeedbackRead(BaseModel):
+    id: str
+    ticket_id: str
+    user_id: str
+    rating: int
+    comment: Optional[str] = None
+    submitted_at: datetime
+
+
+@router.post("/{ticket_id}/feedback", response_model=TicketFeedbackRead, status_code=status.HTTP_201_CREATED)
+async def create_ticket_feedback(
+    ticket_id: str,
+    payload: TicketFeedbackCreate,
+    db: DatabaseSession,
+    current_user: dict = Depends(get_current_user),
+):
+    """Submit rating/feedback for a ticket (Must be ticket's creator)."""
+    ticket = await db.tickets.find_one({"_id": ticket_id})
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket not found",
+        )
+
+    if ticket.get("created_by") != current_user.get("id"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the ticket creator can submit feedback for this ticket",
+        )
+
+    existing = await db.ticket_feedback.find_one({"ticket_id": ticket_id})
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Feedback already exists for this ticket",
+        )
+
+    doc = {
+        "_id": str(uuid4()),
+        "ticket_id": ticket_id,
+        "user_id": current_user.get("id"),
+        "rating": payload.rating,
+        "comment": payload.comment,
+        "submitted_at": datetime.utcnow(),
+    }
+    await db.ticket_feedback.insert_one(doc)
+
+    return TicketFeedbackRead(
+        id=str(doc["_id"]),
+        ticket_id=doc["ticket_id"],
+        user_id=doc["user_id"],
+        rating=doc["rating"],
+        comment=doc.get("comment"),
+        submitted_at=doc["submitted_at"],
+    )
+
+
+@router.get("/{ticket_id}/feedback", response_model=TicketFeedbackRead)
+async def get_ticket_feedback(
+    ticket_id: str,
+    db: DatabaseSession,
+    current_user: dict = Depends(get_current_user),
+):
+    """Get feedback submitted for a ticket."""
+    existing = await db.ticket_feedback.find_one({"ticket_id": ticket_id})
+    if not existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Feedback not found for this ticket",
+        )
+
+    return TicketFeedbackRead(
+        id=str(existing["_id"]),
+        ticket_id=existing["ticket_id"],
+        user_id=existing["user_id"],
+        rating=existing["rating"],
+        comment=existing.get("comment"),
+        submitted_at=existing["submitted_at"],
+    )
