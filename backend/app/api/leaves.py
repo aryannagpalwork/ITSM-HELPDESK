@@ -83,6 +83,6 @@ async def delete_leave_request_endpoint(
 @router.get("/agents/availability", response_model=list[AgentAvailabilityRead], status_code=status.HTTP_200_OK)
 async def list_agents_availability_endpoint(
     db: DatabaseSession,
-    current_user: dict = Depends(require_roles(["Administrator"])),
+    current_user: dict = Depends(require_roles(["Administrator", "Agent"])),
 ) -> list[AgentAvailabilityRead]:
     return await list_agents_availability(db)

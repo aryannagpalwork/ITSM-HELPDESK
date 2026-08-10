@@ -59,6 +59,8 @@ class AgentAvailabilityRead(ORMBase):
     name: str
     on_leave_today: bool
     open_ticket_count: int
+    department: str | None = None
+    specialization: list[str] | str | None = None
 
 
 class CurrentlyOnLeaveRead(ORMBase):

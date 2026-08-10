@@ -45,6 +45,11 @@ class TicketCommentRead(ORMBase):
     created_at: datetime
 
 
+class CommentCreate(BaseModel):
+    content: str = Field(min_length=1)
+    is_internal: bool = False
+
+
 class TicketCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     description: str = Field(min_length=1)

@@ -319,6 +319,64 @@ async def _write_audit(
     await db.audit_logs.insert_one(audit_log)
 
 
+async def add_comment(
+    db: AsyncIOMotorDatabase,
+    ticket_id: str,
+    content: str,
+    is_internal: bool,
+    current_user_id: str,
+) -> TicketCommentRead:
+    """Persist a comment and write an audit-log entry for the timeline."""
+    from app.schemas.ticket import TicketCommentRead as TCR
+
+    ticket = await db.tickets.find_one({"_id": ticket_id})
+    if ticket is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found.")
+
+    now = datetime.utcnow()
+    comment_id = str(uuid4())
+    comment_doc = {
+        "_id": comment_id,
+        "ticket_id": ticket_id,
+        "author_id": current_user_id,
+        "content": content,
+        "is_internal": is_internal,
+        "created_at": now,
+    }
+    await db.ticket_comments.insert_one(comment_doc)
+
+    # Link comment to ticket
+    await db.tickets.update_one(
+        {"_id": ticket_id},
+        {"$push": {"comments": comment_id}, "$set": {"updated_at": now}},
+    )
+
+    # Write audit log so it appears in the lifecycle timeline
+    label = "Internal Note" if is_internal else "Response"
+    await _write_audit(
+        db,
+        action="ticket.commented",
+        user_id=current_user_id,
+        ticket_id=ticket_id,
+        field=label,
+        new_value=content[:500],
+        reason=None,
+    )
+
+    # Return serialized comment
+    author = await db.users.find_one({"_id": current_user_id})
+    return TCR(
+        id=comment_id,
+        ticket_id=ticket_id,
+        author_id=current_user_id,
+        author_name=author.get("full_name") if author else None,
+        author_role=author.get("role") if author else None,
+        content=content,
+        is_internal=is_internal,
+        created_at=now,
+    )
+
+
 async def _serialize_comment(comment: dict, db: AsyncIOMotorDatabase) -> TicketCommentRead:
     author = None
     if comment.get("author_id"):
@@ -335,20 +393,49 @@ async def _serialize_comment(comment: dict, db: AsyncIOMotorDatabase) -> TicketC
     )
 
 
-async def _serialize_audit_log(audit_log: dict, db: AsyncIOMotorDatabase) -> AuditLogRead:
+async def _serialize_audit_log(audit_log: dict, db: AsyncIOMotorDatabase, _user_cache: dict | None = None) -> AuditLogRead:
     metadata = None
     if audit_log.get("metadata_json"):
         try:
             metadata = json.loads(audit_log["metadata_json"])
         except (json.JSONDecodeError, TypeError):
             pass
+
+    cache = _user_cache if _user_cache is not None else {}
+
+    async def _resolve(val: str | None) -> str | None:
+        if not val or not isinstance(val, str):
+            return val
+        if val not in cache:
+            user = await db.users.find_one({"_id": val})
+            cache[val] = user.get("full_name", val) if user else val
+        return cache[val]
+
+    if metadata:
+        if metadata.get("old_value"):
+            metadata["old_value"] = await _resolve(str(metadata["old_value"]))
+        if metadata.get("new_value"):
+            metadata["new_value"] = await _resolve(str(metadata["new_value"]))
+        if metadata.get("changes"):
+            for change in metadata["changes"]:
+                if change.get("old_value"):
+                    change["old_value"] = await _resolve(str(change["old_value"]))
+                if change.get("new_value"):
+                    change["new_value"] = await _resolve(str(change["new_value"]))
+
     user = None
     if audit_log.get("user_id"):
-        user = await db.users.find_one({"_id": audit_log["user_id"]})
+        if audit_log["user_id"] not in cache:
+            user_doc = await db.users.find_one({"_id": audit_log["user_id"]})
+            cache[audit_log["user_id"]] = user_doc.get("full_name") if user_doc else None
+        user_name = cache[audit_log["user_id"]]
+    else:
+        user_name = None
+
     return AuditLogRead(
         id=audit_log["_id"],
         user_id=audit_log.get("user_id"),
-        user_name=user.get("full_name") if user else None,
+        user_name=user_name,
         action=audit_log["action"],
         entity_type=audit_log.get("entity_type"),
         entity_id=audit_log.get("entity_id"),
@@ -704,6 +791,11 @@ async def list_tickets(
     for ticket in tickets:
         serialized_tickets.append(await _serialize_ticket(ticket, db))
     
+    # Hide internal comments from employees
+    if current_user["internal_role"] == "end_user":
+        for t in serialized_tickets:
+            t.comments = [c for c in t.comments if not c.is_internal]
+    
     return TicketListResponse(
         items=serialized_tickets,
         total=total,
@@ -727,7 +819,13 @@ async def get_ticket(db: AsyncIOMotorDatabase, ticket_id: str, current_user: dic
         if not is_assigned:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
     
-    return await _serialize_ticket(ticket, db)
+    result = await _serialize_ticket(ticket, db)
+
+    # Hide internal comments from employees
+    if current_user["internal_role"] == "end_user":
+        result.comments = [c for c in result.comments if not c.is_internal]
+
+    return result
 
 
 async def get_ticket_audit_logs(db: AsyncIOMotorDatabase, ticket_id: str, current_user: dict) -> list[AuditLogRead]:
@@ -739,8 +837,18 @@ async def get_ticket_audit_logs(db: AsyncIOMotorDatabase, ticket_id: str, curren
     ).sort([("created_at", -1)]).to_list(length=None)
     
     serialized = []
+    _user_cache: dict = {}
     for log in audit_logs:
-        serialized.append(await _serialize_audit_log(log, db))
+        # Hide internal-note activities from employees
+        if current_user.get("internal_role") == "end_user":
+            if log.get("action") == "ticket.commented":
+                try:
+                    meta = json.loads(log.get("metadata_json") or "{}")
+                    if meta.get("field") == "Internal Note":
+                        continue
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        serialized.append(await _serialize_audit_log(log, db, _user_cache=_user_cache))
     return serialized
 
 

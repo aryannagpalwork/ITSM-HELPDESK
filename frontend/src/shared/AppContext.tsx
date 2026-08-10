@@ -17,14 +17,14 @@ interface AppContextType {
   kpisLoading: boolean;
   kpisError: string | null;
   isAuthenticated: boolean;
-  pendingUsers: (User & { status: string; email: string; createdAt: string })[];
-  allUsers: (User & { status: string; email: string; createdAt: string; is_active: boolean })[];
+  pendingUsers: (User & { status: string; email: string; createdAt: string; specialization?: string | string[] | null })[];
+  allUsers: (User & { status: string; email: string; createdAt: string; is_active: boolean; specialization?: string | string[] | null })[];
   usersLoading: boolean;
   usersError: string | null;
   ticketsLoading: boolean;
   ticketsError: string | null;
   login: (email: string, password: string) => Promise<void>;
-  register: (fullName: string, email: string, password: string, role: string) => Promise<{ message: string }>;
+  register: (fullName: string, email: string, password: string, role: string, department?: string, specialization?: string[]) => Promise<{ message: string }>;
   logout: () => Promise<void>;
   switchRole: (role: UserRole) => void;
   resetAllData: () => void;
@@ -45,7 +45,7 @@ interface AppContextType {
   closeTicket: (id: string, reason?: string) => Promise<void>;
   reopenTicket: (id: string, reason?: string) => Promise<void>;
   deleteTicket: (id: string, reason?: string) => Promise<void>;
-  addComment: (ticketId: string, content: string, isInternal: boolean) => void;
+  addComment: (ticketId: string, content: string, isInternal: boolean) => Promise<TicketComment>;
   addKBArticle: (article: Omit<KnowledgeArticle, 'id'>) => void;
   loadPendingUsers: () => Promise<void>;
   loadAllUsers: (includeDeleted?: boolean) => Promise<void>;
@@ -53,8 +53,8 @@ interface AppContextType {
   rejectPendingUser: (userId: string) => Promise<void>;
   activatePendingUser: (userId: string) => Promise<void>;
   deactivatePendingUser: (userId: string) => Promise<void>;
-  createUser: (fullName: string, email: string, role: string, department?: string, password?: string) => Promise<string>;
-  updateUser: (userId: string, fullName?: string, department?: string, role?: string) => Promise<void>;
+  createUser: (fullName: string, email: string, role: string, department?: string, password?: string, specialization?: string[]) => Promise<string>;
+  updateUser: (userId: string, fullName?: string, department?: string, role?: string, specialization?: string[]) => Promise<void>;
   deleteUser: (userId: string) => Promise<void>;
   changeUserRole: (userId: string, role: string) => Promise<void>;
 }
@@ -67,8 +67,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return savedUser ? JSON.parse(savedUser) : { id: '', name: '', email: '', role: 'Employee' as UserRole };
   });
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => Boolean(ticketApi.getAccessToken()));
-  const [pendingUsers, setPendingUsers] = useState<(User & { status: string; email: string; createdAt: string })[]>([]);
-  const [allUsers, setAllUsers] = useState<(User & { status: string; email: string; createdAt: string; is_active: boolean })[]>([]);
+  const [pendingUsers, setPendingUsers] = useState<(User & { status: string; email: string; createdAt: string; specialization?: string | string[] | null })[]>([]);
+  const [allUsers, setAllUsers] = useState<(User & { status: string; email: string; createdAt: string; is_active: boolean; specialization?: string | string[] | null })[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState<string | null>(null);
 
@@ -85,10 +85,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [kpisLoading, setKpisLoading] = useState(false);
   const [kpisError, setKpisError] = useState<string | null>(null);
 
-  const register = async (fullName: string, email: string, password: string, role: string): Promise<{ message: string }> => {
+  const register = async (fullName: string, email: string, password: string, role: string, department?: string, specialization?: string[]): Promise<{ message: string }> => {
     // Just register, don't log in automatically
     // Registration returns a message, not tokens — avoids overwriting admin session
-    return ticketApi.register(fullName, email, password, role);
+    return ticketApi.register(fullName, email, password, role, department, specialization);
   };
 
   const login = async (email: string, password: string) => {
@@ -310,19 +310,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     await refreshRoleKPIs();
   };
 
-  const addComment = (ticketId: string, content: string, isInternal: boolean) => {
-    const newComment: TicketComment = {
-      id: `COM${Date.now()}`,
-      ticketId,
-      commenterId: currentUser.id,
-      commenterName: currentUser.name,
-      commenterRole: currentUser.role,
-      content,
-      isInternal,
-      timestamp: new Date().toISOString(),
-    };
-
-    setComments(prev => [...prev, newComment]);
+  const addComment = async (ticketId: string, content: string, isInternal: boolean) => {
+    try {
+      const saved = await ticketApi.addCommentApi(ticketId, content, isInternal);
+      const newComment: TicketComment = ticketApi.mapTicketComment(saved);
+      setComments(prev => [...prev, newComment]);
+      return newComment;
+    } catch (error) {
+      console.warn('Failed to persist comment:', error);
+      // Fallback: add locally so the UI still works offline
+      const newComment: TicketComment = {
+        id: `COM${Date.now()}`,
+        ticketId,
+        commenterId: currentUser.id,
+        commenterName: currentUser.name,
+        commenterRole: currentUser.role,
+        content,
+        isInternal,
+        timestamp: new Date().toISOString(),
+      };
+      setComments(prev => [...prev, newComment]);
+      return newComment;
+    }
   };
 
   const addKBArticle = (articleInput: Omit<KnowledgeArticle, 'id'>) => {
@@ -406,9 +415,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const createUser = async (fullName: string, email: string, role: string, department?: string, password?: string): Promise<string> => {
+  const createUser = async (fullName: string, email: string, role: string, department?: string, password?: string, specialization?: string[]): Promise<string> => {
     try {
-      const generatedPassword = await ticketApi.createUser(fullName, email, role, department, password);
+      const generatedPassword = await ticketApi.createUser(fullName, email, role, department, password, specialization);
       // A newly created account starts in PENDING status. Refresh both user
       // collections so the admin dashboard badge updates immediately.
       await loadPendingUsers();
@@ -420,9 +429,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const updateUser = async (userId: string, fullName?: string, department?: string, role?: string) => {
+  const updateUser = async (userId: string, fullName?: string, department?: string, role?: string, specialization?: string[]) => {
     try {
-      await ticketApi.updateUser(userId, fullName, department, role);
+      await ticketApi.updateUser(userId, fullName, department, role, specialization);
       await loadAllUsers();
     } catch (error) {
       console.warn('Unable to update user.', error);

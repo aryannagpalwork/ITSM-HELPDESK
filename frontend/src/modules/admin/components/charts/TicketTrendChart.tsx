@@ -1,9 +1,9 @@
 import React, { useMemo } from 'react';
 import {
+  Area,
+  AreaChart,
   CartesianGrid,
   Legend,
-  Line,
-  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -62,7 +62,25 @@ const TicketTrendChart: React.FC<Props> = ({ data }) => {
     <div className="h-full flex flex-col" aria-label="Ticket lifecycle trend">
       <div className="min-h-0 flex-1">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={points} margin={{ top: 16, right: 12, left: 0, bottom: 8 }}>
+          <AreaChart data={points} margin={{ top: 16, right: 12, left: 0, bottom: 8 }}>
+            <defs>
+              <linearGradient id="trendCreated" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#38bdf8" stopOpacity={0.25} />
+                <stop offset="95%" stopColor="#38bdf8" stopOpacity={0} />
+              </linearGradient>
+              <linearGradient id="trendInProgress" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#fbbf24" stopOpacity={0.25} />
+                <stop offset="95%" stopColor="#fbbf24" stopOpacity={0} />
+              </linearGradient>
+              <linearGradient id="trendAiResolved" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#a78bfa" stopOpacity={0.25} />
+                <stop offset="95%" stopColor="#a78bfa" stopOpacity={0} />
+              </linearGradient>
+              <linearGradient id="trendAgentResolved" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.25} />
+                <stop offset="95%" stopColor="#22d3ee" stopOpacity={0} />
+              </linearGradient>
+            </defs>
             <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} strokeOpacity={0.3} vertical={false} />
             <XAxis
               dataKey="label"
@@ -81,11 +99,11 @@ const TicketTrendChart: React.FC<Props> = ({ data }) => {
               labelFormatter={(label: string) => `Date: ${formatDate(label)}`}
             />
             <Legend verticalAlign="top" align="right" height={26} wrapperStyle={{ fontSize: '10px', paddingBottom: '6px' }} />
-            <Line type="monotone" dataKey="created" name="Created Tickets" stroke="#38bdf8" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 6, strokeWidth: 2 }} isAnimationActive animationDuration={700} />
-            <Line type="monotone" dataKey="inProgress" name="In Progress" stroke="#fbbf24" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 6, strokeWidth: 2 }} isAnimationActive animationDuration={700} />
-            <Line type="monotone" dataKey="aiResolved" name="Resolved by AI" stroke="#a78bfa" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 6, strokeWidth: 2 }} isAnimationActive animationDuration={700} />
-            <Line type="monotone" dataKey="agentResolved" name="Resolved by Agent" stroke="#22d3ee" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 6, strokeWidth: 2 }} isAnimationActive animationDuration={700} />
-          </LineChart>
+            <Area type="monotone" dataKey="created" name="Created Tickets" stroke="#38bdf8" strokeWidth={2.5} fill="url(#trendCreated)" dot={{ r: 3 }} activeDot={{ r: 6, strokeWidth: 2 }} isAnimationActive animationDuration={700} />
+            <Area type="monotone" dataKey="inProgress" name="In Progress" stroke="#fbbf24" strokeWidth={2.5} fill="url(#trendInProgress)" dot={{ r: 3 }} activeDot={{ r: 6, strokeWidth: 2 }} isAnimationActive animationDuration={700} />
+            <Area type="monotone" dataKey="aiResolved" name="Resolved by AI" stroke="#a78bfa" strokeWidth={2.5} fill="url(#trendAiResolved)" dot={{ r: 3 }} activeDot={{ r: 6, strokeWidth: 2 }} isAnimationActive animationDuration={700} />
+            <Area type="monotone" dataKey="agentResolved" name="Resolved by Agent" stroke="#22d3ee" strokeWidth={2.5} fill="url(#trendAgentResolved)" dot={{ r: 3 }} activeDot={{ r: 6, strokeWidth: 2 }} isAnimationActive animationDuration={700} />
+          </AreaChart>
         </ResponsiveContainer>
       </div>
     </div>

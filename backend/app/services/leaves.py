@@ -252,6 +252,8 @@ async def list_agents_availability(
                 name=agent.get("full_name", ""),
                 on_leave_today=agent["_id"] in current_leave_agent_ids,
                 open_ticket_count=open_ticket_count,
+                department=agent.get("department"),
+                specialization=agent.get("specialization", []),
             )
         )
 

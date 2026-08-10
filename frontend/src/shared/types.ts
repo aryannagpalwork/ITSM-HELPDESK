@@ -10,7 +10,7 @@ export interface User {
   email: string;
   role: UserRole;
   departmentId?: string;
-  specialization?: string;
+  specialization?: string | string[] | null;
   createdAt?: string;
 }
 
@@ -384,6 +384,8 @@ export interface AgentAvailability {
   name: string;
   onLeaveToday: boolean;
   openTicketCount: number;
+  department?: string | null;
+  specialization?: string | string[] | null;
 }
 
 export interface CurrentlyOnLeave {
