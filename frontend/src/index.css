@@ -153,3 +153,18 @@ html, body, #root {
 .text-\[9px\]  { font-size: 11px; }
 .text-\[10px\] { font-size: 12px; }
 .text-\[11px\] { font-size: 13px; }
+
+/* Native date input controls */
+.input-token[type="date"] {
+  color-scheme: dark;
+}
+
+/* Light application theme */
+:root[data-theme="light"] .input-token[type="date"] {
+  color-scheme: light;
+}
+
+.input-token[type="date"]::-webkit-calendar-picker-indicator {
+  opacity: 0.85;
+  cursor: pointer;
+}
