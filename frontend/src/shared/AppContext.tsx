@@ -36,7 +36,7 @@ interface AppContextType {
   loadAdminKPIs: () => Promise<void>;
   refreshRoleKPIs: () => Promise<void>;
   createTicket: (ticket: Partial<Ticket>, reason?: string) => Promise<Ticket>;
-  updateTicket: (id: string, updates: Partial<Ticket>, reason?: string) => Promise<void>;
+  updateTicket: (id: string, updates: Partial<Ticket>, reason?: string) => Promise<Ticket>;
   assignTicket: (id: string, assignedTo?: string, reason?: string) => Promise<void>;
   reassignTicket: (id: string, assignedTo?: string, reason?: string) => Promise<void>;
   listAgents: () => Promise<{ id: string; name: string; email: string; department?: string; specialization?: string; status: string; activeTicketCount: number; available: boolean }[]>;
@@ -259,6 +259,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const updatedTicket = await ticketApi.updateTicket(id, updates, reason);
     setTickets(prev => prev.map(t => (t.id === id ? updatedTicket : t)));
     await refreshRoleKPIs();
+    return updatedTicket;
   };
 
   const assignTicket = async (id: string, assignedTo?: string, reason?: string) => {

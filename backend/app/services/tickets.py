@@ -23,15 +23,14 @@ from app.schemas.ticket import (
 from app.schemas.audit_log import AuditLogRead
 from app.services.sla import calculate_sla, snapshot_for_ticket
 
-ACTIVE_TICKET_STATUSES = {"Open", "In Progress"}
+ACTIVE_TICKET_STATUSES = {"Open", "In Progress", "Awaiting User Response"}
 DEFAULT_AGENT_CAPACITY = 10
 
 # Legacy/imported records may use workflow labels that are not part of the
 # public TicketStatus enum. Keep the API contract stable by mapping those
 # labels to the closest supported lifecycle state at serialization time.
 LEGACY_STATUS_ALIASES = {
-    "awaiting user response": "Open",
-    "awaiting customer response": "Open",
+    "awaiting customer response": "Awaiting User Response",
     "pending": "Open",
     "new": "Open",
 }
@@ -39,7 +38,8 @@ LEGACY_STATUS_ALIASES = {
 
 def normalize_ticket_status(value: object) -> str:
     raw = str(value or "Open").strip()
-    return LEGACY_STATUS_ALIASES.get(raw.lower(), raw)
+    normalized = raw.replace("_", " ").strip().lower()
+    return LEGACY_STATUS_ALIASES.get(normalized, normalized.title())
 
 
 def is_awaiting_user_response(value: object) -> bool:
@@ -97,6 +97,27 @@ async def _notify_unassigned_ticket(db: AsyncIOMotorDatabase, ticket: dict) -> N
              "read": False, "created_at": datetime.utcnow()}
             for admin in admins
         ])
+
+
+async def _notify_agent_employee_response(db: AsyncIOMotorDatabase, ticket: dict) -> None:
+    """Notify the assigned agent that an employee responded on a ticket."""
+    assigned_to = ticket.get("assigned_to")
+    if not assigned_to:
+        return
+
+    agent = await db.users.find_one({"_id": assigned_to, "is_active": True, "deleted": {"$ne": True}})
+    if not agent:
+        return
+
+    await db.notifications.insert_one({
+        "_id": str(uuid4()),
+        "user_id": agent["_id"],
+        "type": "ticket.response",
+        "ticket_id": ticket["_id"],
+        "message": f"Employee has responded on ticket {ticket.get('ticket_number', '')}.",
+        "read": False,
+        "created_at": datetime.utcnow(),
+    })
 
 
 async def _notify_assignment(db: AsyncIOMotorDatabase, ticket: dict, agent: dict, *, is_reassignment: bool = False) -> None:
@@ -383,8 +404,28 @@ async def add_comment(
         reason=None,
     )
 
+    # Auto-transition: awaiting_user_response → in_progress when employee sends non-internal comment
+    # and notify the assigned agent
+    current_user = await db.users.find_one({"_id": current_user_id})
+    is_employee = current_user and current_user.get("role") in ("end_user", "employee")
+    if is_employee and not is_internal and ticket.get("status") == "awaiting_user_response":
+        await db.tickets.update_one(
+            {"_id": ticket_id},
+            {"$set": {"status": "in_progress", "updated_at": now}},
+        )
+        await _write_audit(
+            db,
+            action="ticket.status_changed",
+            user_id=current_user_id,
+            ticket_id=ticket_id,
+            field="status",
+            new_value="in_progress",
+            reason="Employee responded — status moved back to In Progress",
+        )
+        await _notify_agent_employee_response(db, ticket)
+
     # Return serialized comment
-    author = await db.users.find_one({"_id": current_user_id})
+    author = current_user
     return TCR(
         id=comment_id,
         ticket_id=ticket_id,
@@ -1090,14 +1131,14 @@ async def get_agent_metrics(db: AsyncIOMotorDatabase, agent_id: str) -> dict:
     total_assigned = len(assigned_tickets)
     open_count = len([t for t in assigned_tickets if t["status"] == "Open"])
     in_progress_count = len([t for t in assigned_tickets if t["status"] == "In Progress"])
-    waiting_count = len([t for t in assigned_tickets if t["status"] == "Open"])
+    waiting_count = len([t for t in assigned_tickets if t["status"] == "Awaiting User Response"])
     resolved_today = len([
         t for t in assigned_tickets
         if t["status"] == "Resolved" and t.get("updated_at", t["created_at"]) >= today_start
     ])
     overdue_count = len([
         t for t in assigned_tickets
-        if t["status"] in ("Open", "In Progress") and t.get("ai_analysis_estimated_sla")
+        if t["status"] in ("Open", "In Progress", "Awaiting User Response") and t.get("ai_analysis_estimated_sla")
     ])
     
     # Performance metrics
@@ -1155,7 +1196,7 @@ async def get_agent_metrics(db: AsyncIOMotorDatabase, agent_id: str) -> dict:
     # Active SLA breaches
     active_sla_breaches = len([
         t for t in assigned_tickets
-        if t["status"] in ("Open", "In Progress") and t.get("ai_analysis_estimated_sla")
+        if t["status"] in ("Open", "In Progress", "Awaiting User Response") and t.get("ai_analysis_estimated_sla")
     ])
     
     return {

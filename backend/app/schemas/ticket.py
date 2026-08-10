@@ -16,6 +16,7 @@ class TicketPriority(str, Enum):
 class TicketStatus(str, Enum):
     open = "Open"
     in_progress = "In Progress"
+    awaiting_user_response = "Awaiting User Response"
     resolved = "Resolved"
     closed = "Closed"
 

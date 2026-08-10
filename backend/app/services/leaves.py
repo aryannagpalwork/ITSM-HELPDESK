@@ -45,7 +45,7 @@ async def _count_open_tickets(db: AsyncIOMotorDatabase, agent_id: str) -> int:
     return await db.tickets.count_documents(
         {
             "assigned_to": agent_id,
-            "status": {"$in": ["Open", "In Progress"]},
+            "status": {"$in": ["Open", "In Progress", "Awaiting User Response"]},
         }
     )
 

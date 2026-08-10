@@ -30,6 +30,7 @@ type SuggestedTicketState = {
   show: boolean;
   resolvedByAI?: boolean;
   ticketId?: string;
+  knowledgeBaseFallback?: boolean;
 } | null;
 
 type ConversationStatus = 'ACTIVE' | 'INVESTIGATING' | 'WAITING_FOR_USER' | 'LIKELY_RESOLVED' | 'ESCALATED' | 'RESOLVED';
@@ -180,7 +181,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
           description: response.suggested_ticket.description || textToSend,
           priority: (response.suggested_ticket.priority?.toLowerCase() || 'medium') as TicketPriority,
           show: true,
-          ticketId: response.ticket_id || undefined,
+          ticketId: response.ticket_id ?? undefined,
+          knowledgeBaseFallback: response.suggested_ticket.knowledge_base_fallback === true,
         });
       } else if (response.ticket_id) {
         setSuggestedTicket(previous => previous ? { ...previous, ticketId: response.ticket_id ?? undefined } : previous);
@@ -223,7 +225,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }),
         show: true,
         resolvedByAI: true,
-        ticketId: feedbackResult.ticket_id || prev?.ticketId || refreshedAITicket?.id,
+        ticketId: (feedbackResult.ticket_id ?? undefined) || prev?.ticketId || refreshedAITicket?.id,
       }));
       setMessages(prev => [...prev, {
         id: `resolved_${Date.now()}`,
@@ -289,7 +291,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const feedbackResult = await submitAIChatFeedback(sid, 'positive');
         const refreshedTickets = await loadTickets();
         const refreshedAITicket = refreshedTickets.find(ticket => ticket.aiResolved === true);
-        setSuggestedTicket(prev => prev ? { ...prev, show: true, resolvedByAI: true, ticketId: feedbackResult.ticket_id || prev.ticketId || refreshedAITicket?.id } : prev);
+        setSuggestedTicket(prev => prev ? { ...prev, show: true, resolvedByAI: true, ticketId: (feedbackResult.ticket_id ?? undefined) || prev.ticketId || refreshedAITicket?.id } : prev);
       }
       setConversationStatus('RESOLVED');
       setActiveSatisfactionCard(null);

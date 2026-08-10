@@ -97,7 +97,7 @@ async def reconcile_agent_workloads(db: AsyncIOMotorDatabase) -> None:
         {"$group": {
             "_id": "$assigned_to",
             "assigned": {"$sum": 1},
-            "active": {"$sum": {"$cond": [{"$in": ["$status", ["Open", "In Progress"]]}, 1, 0]}},
+            "active": {"$sum": {"$cond": [{"$in": ["$status", ["Open", "In Progress", "Awaiting User Response"]]}, 1, 0]}},
             "resolved": {"$sum": {"$cond": [{"$in": ["$status", ["Resolved", "Closed"]]}, 1, 0]}},
         }},
     ]
