@@ -37,10 +37,6 @@ export const TicketDetails: React.FC = () => {
     loadTicketAuditLogs,
     assignTicket,
     reassignTicket,
-    escalateTicket,
-    resolveTicket,
-    closeTicket,
-    reopenTicket,
   } = useApp();
 
   const [commentInput, setCommentInput] = useState('');
@@ -63,6 +59,10 @@ export const TicketDetails: React.FC = () => {
   });
   const [agents, setAgents] = useState<AgentAvailability[]>([]);
   const [fetchedTicket, setFetchedTicket] = useState<Ticket | null>(null);
+  const [draftStatus, setDraftStatus] = useState<TicketStatus | null>(null);
+  const [draftPriority, setDraftPriority] = useState<TicketPriority | null>(null);
+  const [draftResolution, setDraftResolution] = useState<string | undefined>();
+  const [lifecycleReason, setLifecycleReason] = useState<string | undefined>();
 
   const ticket = tickets.find((t) => t.id === id) || fetchedTicket;
 
@@ -84,6 +84,13 @@ export const TicketDetails: React.FC = () => {
       loadTicketAuditLogs(ticket.id).then(setAuditLogs);
     }
   }, [ticket?.id]);
+
+  useEffect(() => {
+    setDraftStatus(null);
+    setDraftPriority(null);
+    setDraftResolution(undefined);
+    setLifecycleReason(undefined);
+  }, [ticket?.id, ticket?.status, ticket?.priority, ticket?.resolution]);
 
   useEffect(() => {
     if (toast) {
@@ -119,12 +126,40 @@ export const TicketDetails: React.FC = () => {
     .filter((c) => c.ticketId === ticket.id)
     .filter((c) => currentUser.role !== 'Employee' || !c.isInternal);
 
-  const handleStatusChange = (status: TicketStatus) => {
-    updateTicket(ticket.id, { status });
+  const displayedStatus = draftStatus ?? ticket.status;
+  const displayedPriority = draftPriority ?? ticket.priority;
+  const lifecycleDirty = displayedStatus !== ticket.status
+    || displayedPriority !== ticket.priority
+    || draftResolution !== undefined;
+
+  const handleStatusChange = (status: TicketStatus) => setDraftStatus(status);
+
+  const handlePriorityChange = (priority: TicketPriority) => setDraftPriority(priority);
+
+  const resetLifecycleDraft = () => {
+    setDraftStatus(null);
+    setDraftPriority(null);
+    setDraftResolution(undefined);
+    setLifecycleReason(undefined);
   };
 
-  const handlePriorityChange = (priority: TicketPriority) => {
-    updateTicket(ticket.id, { priority });
+  const handleSaveLifecycle = async () => {
+    if (!lifecycleDirty) return;
+    setLoading('save-lifecycle');
+    try {
+      const updates: Partial<Ticket> = { status: displayedStatus, priority: displayedPriority };
+      if (draftResolution !== undefined) updates.resolution = draftResolution;
+      await updateTicket(ticket.id, updates, lifecycleReason);
+      const updatedAuditLogs = await loadTicketAuditLogs(ticket.id);
+      setAuditLogs(updatedAuditLogs);
+      resetLifecycleDraft();
+      setToast({ message: 'Lifecycle changes saved successfully!', type: 'success' });
+    } catch (error) {
+      console.error(error);
+      setToast({ message: 'Unable to save lifecycle changes. Please try again.', type: 'error' });
+    } finally {
+      setLoading(null);
+    }
   };
 
   const openAssignmentModal = async (action: 'assign' | 'reassign') => {
@@ -171,6 +206,24 @@ export const TicketDetails: React.FC = () => {
 
   const handleModalSubmit = async () => {
     if (!modal || !ticket) return;
+    if (['escalate', 'resolve', 'close', 'reopen'].includes(modal.action)) {
+      if (modal.action === 'escalate') {
+        const priorityOrder: TicketPriority[] = ['low', 'medium', 'high', 'critical'];
+        const currentIndex = priorityOrder.indexOf(displayedPriority);
+        if (currentIndex < priorityOrder.length - 1) setDraftPriority(priorityOrder[currentIndex + 1]);
+      }
+      if (modal.action === 'resolve') {
+        setDraftStatus('resolved');
+        setDraftResolution(modalData.resolution || undefined);
+      }
+      if (modal.action === 'close') setDraftStatus('closed');
+      if (modal.action === 'reopen') setDraftStatus('open');
+      setLifecycleReason(modalData.reason || undefined);
+      setToast({ message: `${modal.action[0].toUpperCase()}${modal.action.slice(1)} staged. Click Save Changes to persist it.`, type: 'success' });
+      setModal(null);
+      setModalData({ reason: '', resolution: '', assignedTo: null });
+      return;
+    }
     setLoading(modal.action);
     try {
       switch (modal.action) {
@@ -185,26 +238,6 @@ export const TicketDetails: React.FC = () => {
           }
           await reassignTicket(ticket.id, modalData.assignedTo, modalData.reason || undefined);
           setToast({ message: 'Ticket reassigned successfully!', type: 'success' });
-          break;
-        case 'escalate':
-          const priorityOrder: TicketPriority[] = ['low', 'medium', 'high', 'critical'];
-          const currentIndex = priorityOrder.indexOf(ticket.priority);
-          if (currentIndex < priorityOrder.length - 1) {
-            await escalateTicket(ticket.id, priorityOrder[currentIndex + 1], modalData.reason);
-          }
-          setToast({ message: 'Ticket escalated successfully!', type: 'success' });
-          break;
-        case 'resolve':
-          await resolveTicket(ticket.id, modalData.resolution || undefined, modalData.reason);
-          setToast({ message: 'Ticket resolved successfully!', type: 'success' });
-          break;
-        case 'close':
-          await closeTicket(ticket.id, modalData.reason);
-          setToast({ message: 'Ticket closed successfully!', type: 'success' });
-          break;
-        case 'reopen':
-          await reopenTicket(ticket.id, modalData.reason);
-          setToast({ message: 'Ticket reopened successfully!', type: 'success' });
           break;
       }
       // Refresh audit logs after action
@@ -741,7 +774,7 @@ export const TicketDetails: React.FC = () => {
                     <select
                       id="ticket-status"
                       name="status"
-                      value={ticket.status}
+                      value={displayedStatus}
                       onChange={(e) => handleStatusChange(e.target.value as TicketStatus)}
                       className="w-full input-token rounded-lg p-2.5 text-xs outline-none cursor-pointer"
                     >
@@ -775,7 +808,7 @@ export const TicketDetails: React.FC = () => {
                   )}
                 </div>
 
-                {(ticket.status === 'resolved' || ticket.status === 'closed') && (
+                {(displayedStatus === 'resolved' || displayedStatus === 'closed') && (
                   <div>
                     <span className="block text-[10px] font-mono text-tertiary uppercase mb-1.5">Resolution Source</span>
                     <span className={`inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-md uppercase font-mono ${
@@ -795,7 +828,7 @@ export const TicketDetails: React.FC = () => {
                     <select
                       id="ticket-priority"
                       name="priority"
-                      value={ticket.priority}
+                      value={displayedPriority}
                       onChange={(e) => handlePriorityChange(e.target.value as TicketPriority)}
                       className="w-full input-token rounded-lg p-2.5 text-xs outline-none cursor-pointer"
                     >
@@ -818,7 +851,7 @@ export const TicketDetails: React.FC = () => {
                 {/* Action Buttons */}
                 {canEditMetadata && (
                   <div className="grid grid-cols-2 gap-2 pt-2 border-t border-token">
-                    {ticket.status !== 'resolved' && ticket.status !== 'closed' && (
+                    {displayedStatus !== 'resolved' && displayedStatus !== 'closed' && (
                       <button
                         onClick={() => {
                           setModal({ action: 'escalate', isOpen: true });
@@ -836,7 +869,7 @@ export const TicketDetails: React.FC = () => {
                       </button>
                     )}
 
-                    {ticket.status !== 'resolved' && ticket.status !== 'closed' && (
+                    {displayedStatus !== 'resolved' && displayedStatus !== 'closed' && (
                       <button
                         onClick={() => {
                           setModal({ action: 'resolve', isOpen: true });
@@ -854,7 +887,7 @@ export const TicketDetails: React.FC = () => {
                       </button>
                     )}
 
-                    {ticket.status === 'resolved' && (
+                    {displayedStatus === 'resolved' && (
                       <button
                         onClick={() => {
                           setModal({ action: 'close', isOpen: true });
@@ -872,7 +905,7 @@ export const TicketDetails: React.FC = () => {
                       </button>
                     )}
 
-                    {(ticket.status === 'resolved' || ticket.status === 'closed') && (
+                    {(displayedStatus === 'resolved' || displayedStatus === 'closed') && (
                       <button
                         onClick={() => {
                           setModal({ action: 'reopen', isOpen: true });
@@ -889,6 +922,29 @@ export const TicketDetails: React.FC = () => {
                         Reopen
                       </button>
                     )}
+                  </div>
+                )}
+                {canEditMetadata && (
+                  <div className="flex items-center justify-end gap-2 pt-1">
+                    {lifecycleDirty && (
+                      <button
+                        type="button"
+                        onClick={resetLifecycleDraft}
+                        disabled={loading === 'save-lifecycle'}
+                        className="px-3 py-2 text-[10px] font-semibold text-secondary border border-token rounded-lg hover-surface disabled:opacity-50"
+                      >
+                        Discard
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleSaveLifecycle}
+                      disabled={!lifecycleDirty || loading === 'save-lifecycle'}
+                      className="px-3 py-2 text-[10px] font-semibold text-[var(--accent-primary-contrast)] bg-accent rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                    >
+                      {loading === 'save-lifecycle' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                      Save Changes
+                    </button>
                   </div>
                 )}
               </div>
