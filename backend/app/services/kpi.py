@@ -247,7 +247,7 @@ async def compute_employee_kpis(
     ticket_ids = [t["_id"] for t in tickets]
 
     total = len(tickets)
-    open_tickets = [t for t in tickets if t["status"] in ("Open", "In Progress")]
+    open_tickets = [t for t in tickets if t["status"] in ("Open", "In Progress", "Awaiting User Response")]
     resolved_closed = [t for t in tickets if t["status"] in ("Resolved", "Closed")]
     resolved_count = len(resolved_closed)
 
@@ -358,7 +358,7 @@ async def compute_agent_kpis(
                 resolution_hours = float(sla.get("resolution_duration_hours") or _hours_between(created_dt, updated_dt))
                 mttr_total += resolution_hours
                 mttr_n += 1
-        elif t["status"] in ("Open", "In Progress"):
+        elif t["status"] in ("Open", "In Progress", "Awaiting User Response"):
             if sla.get("sla_breached"):
                 overdue += 1
 
@@ -437,7 +437,7 @@ async def compute_admin_kpis(db: AsyncIOMotorDatabase) -> AdminKPIs:
     tickets = await db.tickets.find({}).to_list(length=None)
     ticket_ids = [t["_id"] for t in tickets]
 
-    backlog = len([t for t in tickets if t["status"] in ("Open", "In Progress")])
+    backlog = len([t for t in tickets if t["status"] in ("Open", "In Progress", "Awaiting User Response")])
 
     reopen_counts = await _get_ticket_reopen_counts(db, ticket_ids)
     escalation_counts = await _get_ticket_escalation_counts(db, ticket_ids)
@@ -753,6 +753,7 @@ async def get_admin_monthly_analytics(
             "totalCreated": {"$sum": 1},
             "open": {"$sum": {"$cond": [{"$eq": ["$status", "Open"]}, 1, 0]}},
             "inProgress": {"$sum": {"$cond": [{"$eq": ["$status", "In Progress"]}, 1, 0]}},
+            "awaitingUserResponse": {"$sum": {"$cond": [{"$eq": ["$status", "Awaiting User Response"]}, 1, 0]}},
             "resolved": {"$sum": {"$cond": [{"$eq": ["$status", "Resolved"]}, 1, 0]}},
             "closed": {"$sum": {"$cond": [{"$eq": ["$status", "Closed"]}, 1, 0]}},
             "aiResolved": {"$sum": {"$cond": [

@@ -41,6 +41,7 @@ export const AIChat: React.FC = () => {
     show: boolean;
     resolvedByAI?: boolean;
     ticketId?: string;
+    knowledgeBaseFallback?: boolean;
   } | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [collapsedMessages, setCollapsedMessages] = useState<Record<string, boolean>>({});
@@ -154,6 +155,7 @@ export const AIChat: React.FC = () => {
           priority: (response.suggested_ticket.priority?.toLowerCase() || 'medium') as TicketPriority,
           show: true,
           ticketId: response.ticket_id || undefined,
+          knowledgeBaseFallback: response.suggested_ticket.knowledge_base_fallback === true,
         });
       } else if (response.ticket_id) {
         setSuggestedTicket(previous => previous ? { ...previous, ticketId: response.ticket_id } : previous);
@@ -812,13 +814,17 @@ export const AIChat: React.FC = () => {
             >
               <div className="flex items-center space-x-2 mb-3" style={{ color: tokens.accentPrimary }}>
                 <PlusCircle className="w-4 h-4" />
-                <h4 className="text-xs font-semibold">Incident Proposal</h4>
+                <h4 className="text-xs font-semibold">
+                  {suggestedTicket.knowledgeBaseFallback ? 'Create IT Support Ticket' : 'Incident Proposal'}
+                </h4>
               </div>
               <p 
                 className="text-[10px] leading-relaxed mb-4"
                 style={{ color: 'var(--text-secondary)' }}
               >
-                The Copilot has analyzed your problem and prepared an automated Service Ticket template to bypass standard level-1 queues.
+                {suggestedTicket.knowledgeBaseFallback
+                  ? 'The Knowledge Base did not contain enough relevant information for this query. File a ticket so the IT team can help.'
+                  : 'The Copilot has analyzed your problem and prepared an automated Service Ticket template to bypass standard level-1 queues.'}
               </p>
 
               <div 
@@ -853,7 +859,7 @@ export const AIChat: React.FC = () => {
                 onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.9'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
               >
-                <span>{suggestedTicket.resolvedByAI ? 'Resolved by AI' : 'File Support Incident'}</span>
+                <span>{suggestedTicket.resolvedByAI ? 'Resolved by AI' : suggestedTicket.knowledgeBaseFallback ? 'Create Ticket / File Incident' : 'File Support Incident'}</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>

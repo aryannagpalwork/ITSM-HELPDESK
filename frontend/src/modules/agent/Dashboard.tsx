@@ -50,6 +50,7 @@ const getStatusBadgeStyle = (status: TicketStatus, tokens: any) => {
   switch (status) {
     case 'open': return { backgroundColor: tokens.statusSuccessBg, color: tokens.statusSuccess, border: `1px solid ${tokens.statusSuccess}33` };
     case 'in_progress': return { backgroundColor: tokens.accentPrimaryBg, color: tokens.accentPrimary, border: `1px solid ${tokens.accentPrimary}33` };
+    case 'awaiting_user_response': return { backgroundColor: tokens.statusWarningBg || 'rgba(245,158,11,0.1)', color: tokens.statusWarning || '#f59e0b', border: `1px solid ${tokens.statusWarning || '#f59e0b'}33` };
     case 'resolved': return { backgroundColor: tokens.statusInfoBg, color: tokens.statusInfo, border: `1px solid ${tokens.statusInfo}33` };
     case 'closed': return { backgroundColor: tokens.hover, color: tokens.textTertiary, border: `1px solid ${tokens.border}` };
   }
@@ -712,11 +713,12 @@ export const AgentDashboard: React.FC = () => {
               className="w-full bg-transparent border-none text-[10px] focus:ring-0 outline-none py-0.5 cursor-pointer"
               style={{ color: tokens.textSecondary }}
             >
-              <option value="all">All</option>
-              <option value="open">Open</option>
-              <option value="in_progress">In Progress</option>
-              <option value="resolved">Resolved</option>
-              <option value="closed">Closed</option>
+    <option value="all">All</option>
+    <option value="open">Open</option>
+    <option value="in_progress">In Progress</option>
+    <option value="awaiting_user_response">Awaiting User Response</option>
+    <option value="resolved">Resolved</option>
+    <option value="closed">Closed</option>
             </select>
           </div>
 
@@ -810,7 +812,7 @@ export const AgentDashboard: React.FC = () => {
                         className="text-[8px] font-mono uppercase px-1.5 py-0.5 rounded-full font-semibold"
                         style={getStatusBadgeStyle(ticket.status, tokens)}
                       >
-                        {ticket.status.replace('_', ' ')}
+                        {ticket.status === 'awaiting_user_response' ? 'Awaiting User Response' : ticket.status.replace('_', ' ')}
                       </span>
                       {ticket.aiAnalysisEstimatedSla && (
                         <span 

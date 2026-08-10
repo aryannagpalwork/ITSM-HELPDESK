@@ -222,7 +222,7 @@ interface BackendTicket {
   description: string;
   category: string;
   priority: 'Low' | 'Medium' | 'High' | 'Critical';
-  status: 'Open' | 'In Progress' | 'Resolved' | 'Closed';
+  status: 'Open' | 'In Progress' | 'Awaiting User Response' | 'Resolved' | 'Closed';
   awaiting_user_response?: boolean;
   assigned_to?: string;
   assigned_to_name?: string;
@@ -419,14 +419,22 @@ const extractErrorFromResponse = async (response: Response): Promise<string> => 
   }
 };
 
-const statusToFrontend = (status: BackendTicket['status']): TicketStatus => {
-  const map: Record<BackendTicket['status'], TicketStatus> = {
-    Open: 'open',
-    'In Progress': 'in_progress',
-    Resolved: 'resolved',
-    Closed: 'closed',
+const statusToFrontend = (
+  status: BackendTicket['status'],
+  awaitingUserResponse = false,
+): TicketStatus => {
+  if (awaitingUserResponse) return 'awaiting_user_response';
+
+  const normalized = String(status || 'Open').trim().toLowerCase().replace(/_/g, ' ');
+  const map: Record<string, TicketStatus> = {
+    open: 'open',
+    'in progress': 'in_progress',
+    'awaiting user response': 'awaiting_user_response',
+    'awaiting customer response': 'awaiting_user_response',
+    resolved: 'resolved',
+    closed: 'closed',
   };
-  return map[status] || 'open';
+  return map[normalized] || 'open';
 };
 
 const priorityToFrontend = (priority: BackendTicket['priority']): TicketPriority => {
@@ -743,7 +751,7 @@ export const mapTicket = (ticket: BackendTicket): Ticket => ({
   title: ticket.title,
   description: ticket.description,
   category: ticket.category,
-  status: statusToFrontend(ticket.status),
+  status: statusToFrontend(ticket.status, ticket.awaiting_user_response === true),
   awaitingCustomerResponse: ticket.awaiting_user_response === true,
   priority: priorityToFrontend(ticket.priority),
   userId: ticket.created_by || '',

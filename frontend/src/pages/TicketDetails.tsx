@@ -34,6 +34,7 @@ export const TicketDetails: React.FC = () => {
     updateTicket,
     deleteTicket,
     addComment,
+    loadTickets,
     loadTicketAuditLogs,
     assignTicket,
     reassignTicket,
@@ -119,8 +120,18 @@ export const TicketDetails: React.FC = () => {
     .filter((c) => c.ticketId === ticket.id)
     .filter((c) => currentUser.role !== 'Employee' || !c.isInternal);
 
-  const handleStatusChange = (status: TicketStatus) => {
-    updateTicket(ticket.id, { status });
+  const handleStatusChange = async (status: TicketStatus) => {
+    if (!ticket) return;
+    try {
+      const updatedTicket = await updateTicket(ticket.id, { status });
+      // Tickets loaded directly by ID are rendered from fetchedTicket until
+      // the global ticket list contains them. Keep that local value in sync so
+      // the controlled select cannot snap back to the previous status.
+      setFetchedTicket(updatedTicket);
+    } catch (error) {
+      console.error('[Ticket Status] Failed to update status:', error);
+      setToast({ message: 'Unable to update ticket status.', type: 'error' });
+    }
   };
 
   const handlePriorityChange = (priority: TicketPriority) => {
@@ -158,7 +169,10 @@ export const TicketDetails: React.FC = () => {
     setCommentInput('');
     setIsInternalComment(false);
 
-    // Reload audit logs so the new comment activity appears in the timeline
+    // Reload ticket data (backend auto-transitions awaiting_user_response → in_progress
+    // when an employee sends a non-internal comment)
+    await loadTickets();
+    // Reload audit logs so the new comment + any status change appear in the timeline
     loadTicketAuditLogs(ticket.id).then(setAuditLogs);
   };
 
@@ -258,6 +272,8 @@ export const TicketDetails: React.FC = () => {
         return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
       case 'in_progress':
         return 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20';
+      case 'awaiting_user_response':
+        return 'bg-amber-500/10 text-amber-400 border border-amber-500/20';
       case 'resolved':
         return 'bg-sky-500/10 text-sky-400 border border-sky-500/20';
       case 'closed':
@@ -822,10 +838,11 @@ export const TicketDetails: React.FC = () => {
                       onChange={(e) => handleStatusChange(e.target.value as TicketStatus)}
                       className="w-full input-token rounded-lg p-2.5 text-xs outline-none cursor-pointer"
                     >
-                      <option value="open">Open</option>
-                      <option value="in_progress">In Progress</option>
-                      <option value="resolved">Resolved</option>
-                      <option value="closed">Closed</option>
+      <option value="open">Open</option>
+      <option value="in_progress">In Progress</option>
+      <option value="awaiting_user_response">Awaiting User Response</option>
+      <option value="resolved">Resolved</option>
+      <option value="closed">Closed</option>
                     </select>
                   ) : (
                     <div className="flex items-center justify-between">

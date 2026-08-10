@@ -19,7 +19,7 @@ export interface Department {
   name: string;
 }
 
-export type TicketStatus = 'open' | 'in_progress' | 'resolved' | 'closed';
+export type TicketStatus = 'open' | 'in_progress' | 'awaiting_user_response' | 'resolved' | 'closed';
 export type TicketPriority = 'low' | 'medium' | 'high' | 'critical';
 
 export interface Ticket {
@@ -110,8 +110,8 @@ export interface SystemAlert {
 export interface UserNotification {
   id: string;
   userId: string;
-  type: 'alert' | 'info';
-  title: string;
+  type: 'alert' | 'info' | 'ticket.assigned' | 'ticket.unassigned' | 'ticket.response' | 'feedback_request';
+  title?: string;
   message: string;
   ticketId?: string | null;
   alertId?: string | null;

@@ -48,6 +48,7 @@ const PRIORITY_WEIGHT: Record<string, number> = { critical: 4, high: 3, medium: 
 const STATUS_META: { key: string; name: string }[] = [
   { key: 'open', name: 'Open' },
   { key: 'in_progress', name: 'In Progress' },
+  { key: 'awaiting_user_response', name: 'Awaiting User Response' },
   { key: 'resolved', name: 'Resolved' },
   { key: 'closed', name: 'Closed' },
 ];
