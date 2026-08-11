@@ -1,7 +1,8 @@
 from typing import Annotated, Optional
 from datetime import datetime
+from uuid import uuid4
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
 from fastapi import Depends
 from fastapi.responses import Response
 from pydantic import BaseModel, Field

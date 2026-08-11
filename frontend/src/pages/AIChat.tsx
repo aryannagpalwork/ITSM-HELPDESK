@@ -1,7 +1,9 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useChat } from '../shared/ChatContext';
+import { useApp } from '../shared/AppContext';
 import { useTheme } from '../shared/ThemeContext';
+import type { ChatMessage, SatisfactionCard, TicketPriority } from '../shared/types';
+import { escalateToTicket, sendChat, submitAIChatFeedback } from '../shared/api';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -24,6 +26,7 @@ import {
 export const AIChat: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { loadTickets } = useApp();
   const { tokens } = useTheme();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -196,7 +199,7 @@ export const AIChat: React.FC = () => {
           knowledgeBaseFallback: response.suggested_ticket.knowledge_base_fallback === true,
         });
       } else if (response.ticket_id) {
-        setSuggestedTicket(previous => previous ? { ...previous, ticketId: response.ticket_id } : previous);
+        setSuggestedTicket(previous => previous ? { ...previous, ticketId: response.ticket_id ?? undefined } : previous);
       } else if (response.guided_state && response.guided_state !== 'RESOLVED' && response.guided_state !== 'NO_SOLUTION') {
         // Keep a non-submitted draft visible throughout the Copilot session.
         // This is only sidebar state; the existing File Support Incident action
