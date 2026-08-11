@@ -51,88 +51,96 @@ export const AIChat: React.FC = () => {
     resetThread,
   } = useChat();
 
-  const [isProcessing, setIsProcessing] = useState(false);
-  const isProcessingRef = useRef(false);
-  const conversationEndedRef = useRef(false);
+    const [isProcessing, setIsProcessing] = useState(false);
+    const isProcessingRef = useRef(false);
+    const conversationEndedRef = useRef(false);
+    const isAtBottomRef = useRef(true);
 
-  const beginProcessing = () => {
-    if (isProcessingRef.current) return false;
-    isProcessingRef.current = true;
-    setIsProcessing(true);
-    return true;
+    const beginProcessing = () => {
+      if (isProcessingRef.current) return false;
+      isProcessingRef.current = true;
+      setIsProcessing(true);
+      return true;
+    };
+
+    const finishProcessing = () => {
+      isProcessingRef.current = false;
+      setIsProcessing(false);
+    };
+
+    const handleSendPromptWrapper = async (textToSend: string) => {
+      if (!textToSend.trim() || !beginProcessing()) return;
+
+      const isFreshQuery = conversationEndedRef.current;
+      conversationEndedRef.current = false;
+      if (isFreshQuery) {
+        resetThread();
+      }
+
+      try {
+        await handleSendPrompt(textToSend);
+      } finally {
+        finishProcessing();
+      }
+    };
+
+    const handleGuidedYesWrapper = async () => {
+      if (!beginProcessing()) return;
+      try {
+        await handleGuidedYes();
+        conversationEndedRef.current = true;
+      } finally {
+        finishProcessing();
+      }
+    };
+
+    const handleGuidedNoWrapper = () => {
+      if (isProcessingRef.current) return;
+      handleGuidedNo();
+    };
+
+    const handleConvertTicketWrapper = async () => {
+      if (!beginProcessing()) return;
+      try {
+        await handleConvertTicket();
+        conversationEndedRef.current = true;
+      } finally {
+        finishProcessing();
+      }
+    };
+
+    const handleSatisfactionResolvedWrapper = async () => {
+      if (!beginProcessing()) return;
+      try {
+        await handleSatisfactionResolved();
+        conversationEndedRef.current = true;
+      } finally {
+        finishProcessing();
+      }
+    };
+
+    const handleSatisfactionCreateTicketWrapper = async () => {
+      if (!beginProcessing()) return;
+      try {
+        await handleSatisfactionCreateTicket();
+        conversationEndedRef.current = true;
+      } finally {
+        finishProcessing();
+      }
+    };
+
+    useEffect(() => {
+      if (contentRef.current && isAtBottomRef.current) {
+        contentRef.current.scrollTop = contentRef.current.scrollHeight;
+      }
+    }, [messages, isTyping, typingText]);
+
+    const handleConversationScroll = () => {
+    const content = contentRef.current;
+    if (!content) return;
+
+    isAtBottomRef.current = content.scrollHeight - content.scrollTop - content.clientHeight < 24;
   };
-
-  const finishProcessing = () => {
-    isProcessingRef.current = false;
-    setIsProcessing(false);
-  };
-
-  const handleSendPromptWrapper = async (textToSend: string) => {
-    if (!textToSend.trim() || !beginProcessing()) return;
-
-    const isFreshQuery = conversationEndedRef.current;
-    conversationEndedRef.current = false;
-    if (isFreshQuery) {
-      resetThread();
-    }
-
-    try {
-      await handleSendPrompt(textToSend);
-    } finally {
-      finishProcessing();
-    }
-  };
-
-  const handleGuidedYesWrapper = async () => {
-    if (!beginProcessing()) return;
-    try {
-      await handleGuidedYes();
-      conversationEndedRef.current = true;
-    } finally {
-      finishProcessing();
-    }
-  };
-
-  const handleGuidedNoWrapper = () => {
-    if (isProcessingRef.current) return;
-    handleGuidedNo();
-  };
-
-  const handleConvertTicketWrapper = async () => {
-    if (!beginProcessing()) return;
-    try {
-      await handleConvertTicket();
-      conversationEndedRef.current = true;
-    } finally {
-      finishProcessing();
-    }
-  };
-
-  const handleSatisfactionResolvedWrapper = async () => {
-    if (!beginProcessing()) return;
-    try {
-      await handleSatisfactionResolved();
-      conversationEndedRef.current = true;
-    } finally {
-      finishProcessing();
-    }
-  };
-
-  const handleSatisfactionCreateTicketWrapper = async () => {
-    if (!beginProcessing()) return;
-    try {
-      await handleSatisfactionCreateTicket();
-      conversationEndedRef.current = true;
-    } finally {
-      finishProcessing();
-    }
-  };
-
-  useEffect(() => {
-    if (contentRef.current) {
-      contentRef.current.scrollTop = contentRef.current.scrollHeight;
-    }
-  }, [messages, isTyping, typingText]);
 
   useEffect(() => {
     const state = location.state as { initialPrompt?: string };
@@ -292,6 +300,7 @@ export const AIChat: React.FC = () => {
         <div 
           ref={contentRef}
           className="flex-1 overflow-y-auto p-6 space-y-8"
+          onScroll={handleConversationScroll}
         >
           {messages.map((msg, idx) => {
             const isBot = msg.sender === 'assistant';
