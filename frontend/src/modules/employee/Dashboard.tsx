@@ -103,7 +103,7 @@ export const EmployeeDashboard: React.FC = () => {
 
   const chartTickets = useMemo(() => myTickets.filter(ticket => {
     if (chartFilter === 'resolved') return ticket.status === 'resolved' || ticket.status === 'closed';
-    if (chartFilter === 'open') return ticket.status === 'open' || ticket.status === 'in_progress' || ticket.status === 'awaiting_user_response';
+      if (chartFilter === 'open') return ticket.status === 'open' || ticket.status === 'in_progress' || ticket.status === 'waiting_for_user_response';
     return true;
   }), [myTickets, chartFilter]);
 
@@ -217,7 +217,7 @@ const getStatusBadgeColor = (status: TicketStatus) => {
   switch (status) {
     case 'open': return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
     case 'in_progress': return 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20';
-    case 'awaiting_user_response': return 'bg-amber-500/10 text-amber-400 border border-amber-500/20';
+    case 'waiting_for_user_response': return 'bg-amber-500/10 text-amber-400 border border-amber-500/20';
     case 'resolved': return 'bg-sky-500/10 text-sky-400 border border-sky-500/20';
     case 'closed': return 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20';
   }
@@ -538,7 +538,7 @@ const getStatusBadgeColor = (status: TicketStatus) => {
     <option value="all">All</option>
     <option value="open">Open</option>
     <option value="in_progress">In Progress</option>
-    <option value="awaiting_user_response">Awaiting User Response</option>
+    <option value="waiting_for_user_response">Awaiting User Response</option>
     <option value="resolved">Resolved</option>
     <option value="closed">Closed</option>
               </select>
@@ -605,7 +605,7 @@ const getStatusBadgeColor = (status: TicketStatus) => {
                           {ticket.priority}
                         </span>
                         <span className={`text-[9px] font-mono uppercase px-2 py-0.5 rounded-full font-semibold ${getStatusBadgeColor(ticket.status)}`}>
-                          {ticket.status === 'in_progress' ? 'In Progress' : ticket.status === 'awaiting_user_response' ? 'Awaiting User Response' : ticket.status}
+                          {ticket.status === 'in_progress' ? 'In Progress' : ticket.status === 'waiting_for_user_response' ? 'Awaiting User Response' : ticket.status}
                         </span>
                         {ticket.category && (
                           <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-card-solid text-secondary border border-token">

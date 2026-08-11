@@ -12,8 +12,6 @@ import {
   RefreshCcw,
   Sparkles,
   Timer,
-  Target,
-  Smile,
   Inbox,
   ChevronRight,
   AlertTriangle,
@@ -122,8 +120,8 @@ export const AdminDashboard: React.FC = () => {
 
   // Derived merged values (prefer backend adminKPIs where available).
   const orgMTTR = adminKPIs?.orgMttrHours ?? null;
-  const orgFCR = adminKPIs?.orgFcrRate ?? null;
-  const orgCSAT = adminKPIs?.orgCsatScore ?? null;
+  const orgAgentFCR = adminKPIs?.orgAgentFcrRate ?? null;
+  const userSatisfaction = adminKPIs?.userSatisfaction ?? null;
   const richKpisAvailable = adminKPIs !== null && isAdmin;
   const kpiLoading = isAdmin && kpisLoading && !adminKPIs;
 
@@ -277,24 +275,24 @@ export const AdminDashboard: React.FC = () => {
             onOpen={() => goToTickets('?status=resolved')}
           />
           <KpiCard
-            label="First Contact Resolution"
-            icon={<Target className="w-3.5 h-3.5 text-green-400" />}
-            value={orgFCR !== null ? `${orgFCR}%` : '—'}
-            valueClass="text-green-400"
-            sublabel={richKpisAvailable ? 'Resolved on first contact' : 'Pending data'}
+            label="User Satisfaction"
+            icon={<Bot className="w-3.5 h-3.5 text-violet-400" />}
+            value={userSatisfaction !== null ? `${userSatisfaction}%` : '—'}
+            valueClass="text-violet-400"
+            sublabel={richKpisAvailable ? 'Tickets resolved by AI' : 'Pending data'}
             loading={kpiLoading}
-            isActive={filterActive('First Contact Resolution')}
+            isActive={filterActive('User Satisfaction')}
             onClick={() => goToTickets('?status=resolved')}
             onOpen={() => goToTickets('?status=resolved')}
           />
           <KpiCard
-            label="User Satisfaction (CSAT)"
-            icon={<Smile className="w-3.5 h-3.5 text-emerald-400" />}
-            value={orgCSAT !== null ? `${orgCSAT}%` : '—'}
-            valueClass="text-emerald-400"
-            sublabel={richKpisAvailable ? 'Derived satisfaction index' : 'Pending data'}
+            label="Agent First Contact Resolution"
+            icon={<UserCheck className="w-3.5 h-3.5 text-cyan-400" />}
+            value={orgAgentFCR !== null ? `${orgAgentFCR}%` : '—'}
+            valueClass="text-cyan-400"
+            sublabel={richKpisAvailable ? 'First-contact agent resolutions' : 'Pending data'}
             loading={kpiLoading}
-            isActive={filterActive('User Satisfaction (CSAT)')}
+            isActive={filterActive('Agent First Contact Resolution')}
             onClick={() => goToTickets('?status=resolved')}
             onOpen={() => goToTickets('?status=resolved')}
           />

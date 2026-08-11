@@ -21,7 +21,6 @@ import {
   AlertTriangle,
   CheckCheck,
   RefreshCcw,
-  ThumbsUp,
   TrendingUp,
   X,
   ArrowUpRight,
@@ -50,7 +49,7 @@ const getStatusBadgeStyle = (status: TicketStatus, tokens: any) => {
   switch (status) {
     case 'open': return { backgroundColor: tokens.statusSuccessBg, color: tokens.statusSuccess, border: `1px solid ${tokens.statusSuccess}33` };
     case 'in_progress': return { backgroundColor: tokens.accentPrimaryBg, color: tokens.accentPrimary, border: `1px solid ${tokens.accentPrimary}33` };
-    case 'awaiting_user_response': return { backgroundColor: tokens.statusWarningBg || 'rgba(245,158,11,0.1)', color: tokens.statusWarning || '#f59e0b', border: `1px solid ${tokens.statusWarning || '#f59e0b'}33` };
+    case 'waiting_for_user_response': return { backgroundColor: tokens.statusWarningBg || 'rgba(245,158,11,0.1)', color: tokens.statusWarning || '#f59e0b', border: `1px solid ${tokens.statusWarning || '#f59e0b'}33` };
     case 'resolved': return { backgroundColor: tokens.statusInfoBg, color: tokens.statusInfo, border: `1px solid ${tokens.statusInfo}33` };
     case 'closed': return { backgroundColor: tokens.hover, color: tokens.textTertiary, border: `1px solid ${tokens.border}` };
   }
@@ -321,7 +320,7 @@ export const AgentDashboard: React.FC = () => {
     reopenRate: 0,
   };
 
-  const m: AgentMetrics & { fcrRate: number | null; csatScore: number | null } = {
+  const m: AgentMetrics & { userSatisfaction: number | null; agentFcrRate: number | null } = {
     assignedTickets: roleAgentKPIs?.assignedTickets ?? legacy.assignedTickets,
     openTickets: roleAgentKPIs?.openTickets ?? legacy.openTickets,
     inProgress: roleAgentKPIs?.inProgress ?? legacy.inProgress,
@@ -334,8 +333,8 @@ export const AgentDashboard: React.FC = () => {
     slaCompliance: roleAgentKPIs?.slaCompliance ?? legacy.slaCompliance,
     resolutionRate: roleAgentKPIs?.resolutionRate ?? legacy.resolutionRate,
     reopenRate: roleAgentKPIs?.reopenRate ?? legacy.reopenRate,
-    fcrRate: roleAgentKPIs?.fcrRate ?? null,
-    csatScore: roleAgentKPIs?.csatScore ?? null,
+    agentFcrRate: roleAgentKPIs?.agentFcrRate ?? null,
+    userSatisfaction: roleAgentKPIs?.userSatisfaction ?? null,
     avgResolutionTime: legacy.avgResolutionTime,
     activeSlaBreaches: legacy.activeSlaBreaches,
     agentWorkload: legacy.agentWorkload,
@@ -542,8 +541,8 @@ export const AgentDashboard: React.FC = () => {
           <KpiCard tokens={tokens} label="Assigned" value={m.assignedTickets} icon={<Inbox className="w-3 h-3" style={{ color: tokens.accentPrimary }} />} color="" subtitle={metricsAvailable ? 'Open assigned ticket queue' : 'Loading...'} isActive={cardFilter?.label === 'Assigned'} onClick={() => navigate('/agent/tickets')} onOpen={() => navigate('/agent/tickets')} openLabel="Open full ticket queue" />
           <KpiCard tokens={tokens} label="Resolved Today" value={m.resolvedToday} icon={<CheckCircle2 className="w-3 h-3" style={{ color: tokens.statusInfo }} />} color="" subtitle={metricsAvailable ? 'Open resolved tickets' : 'Loading...'} isActive={cardFilter?.label === 'Resolved Today'} onClick={() => navigate('/agent/tickets?status=resolved')} onOpen={() => navigate('/agent/tickets?status=resolved')} openLabel="Open resolved tickets" />
           <KpiCard tokens={tokens} label="Mean Time To Resolution" value={metricsAvailable ? `${m.avgResolutionTimeHours}h` : 'N/A'} icon={<Timer className="w-3 h-3" style={{ color: tokens.statusInfo }} />} color="" subtitle="Open resolved tickets" isActive={cardFilter?.label === 'Mean Time To Resolution'} onClick={() => navigate('/agent/tickets?status=resolved')} onOpen={() => navigate('/agent/tickets?status=resolved')} openLabel="Open resolved tickets" />
-          <KpiCard tokens={tokens} label="First Contact Resolution" value={richKpisAvailable && m.fcrRate !== null ? `${m.fcrRate}%` : '—'} icon={<CheckCheck className="w-3 h-3" style={{ color: tokens.statusSuccess }} />} color="" subtitle="Open resolved tickets" accent={richKpisAvailable} isActive={cardFilter?.label === 'First Contact Resolution'} onClick={() => navigate('/agent/tickets?status=resolved')} onOpen={() => navigate('/agent/tickets?status=resolved')} openLabel="Open resolved tickets" />
-          <KpiCard tokens={tokens} label="User Satisfaction (CSAT)" value={richKpisAvailable && m.csatScore !== null ? `${m.csatScore}%` : '—'} icon={<ThumbsUp className="w-3 h-3" style={{ color: tokens.statusSuccess }} />} color="" subtitle="Open resolved tickets" accent={richKpisAvailable} isActive={cardFilter?.label === 'User Satisfaction (CSAT)'} onClick={() => navigate('/agent/tickets?status=resolved')} onOpen={() => navigate('/agent/tickets?status=resolved')} openLabel="Open resolved tickets" />
+          <KpiCard tokens={tokens} label="User Satisfaction" value={richKpisAvailable && m.userSatisfaction !== null ? `${m.userSatisfaction}%` : '—'} icon={<Sparkles className="w-3 h-3" style={{ color: tokens.statusInfo }} />} color="" subtitle="Tickets resolved by AI" accent={richKpisAvailable} isActive={cardFilter?.label === 'User Satisfaction'} onClick={() => navigate('/agent/tickets?status=resolved')} onOpen={() => navigate('/agent/tickets?status=resolved')} openLabel="Open resolved tickets" />
+          <KpiCard tokens={tokens} label="Agent First Contact Resolution" value={richKpisAvailable && m.agentFcrRate !== null ? `${m.agentFcrRate}%` : '—'} icon={<UserCircle2 className="w-3 h-3" style={{ color: tokens.accentPrimary }} />} color="" subtitle="First-contact agent resolutions" accent={richKpisAvailable} isActive={cardFilter?.label === 'Agent First Contact Resolution'} onClick={() => navigate('/agent/tickets?status=resolved')} onOpen={() => navigate('/agent/tickets?status=resolved')} openLabel="Open resolved tickets" />
         </div>
       </div>
 
@@ -716,7 +715,7 @@ export const AgentDashboard: React.FC = () => {
     <option value="all">All</option>
     <option value="open">Open</option>
     <option value="in_progress">In Progress</option>
-    <option value="awaiting_user_response">Awaiting User Response</option>
+    <option value="waiting_for_user_response">Awaiting User Response</option>
     <option value="resolved">Resolved</option>
     <option value="closed">Closed</option>
             </select>
@@ -812,7 +811,7 @@ export const AgentDashboard: React.FC = () => {
                         className="text-[8px] font-mono uppercase px-1.5 py-0.5 rounded-full font-semibold"
                         style={getStatusBadgeStyle(ticket.status, tokens)}
                       >
-                        {ticket.status === 'awaiting_user_response' ? 'Awaiting User Response' : ticket.status.replace('_', ' ')}
+                        {ticket.status === 'waiting_for_user_response' ? 'Awaiting User Response' : ticket.status.replace('_', ' ')}
                       </span>
                       {ticket.aiAnalysisEstimatedSla && (
                         <span 

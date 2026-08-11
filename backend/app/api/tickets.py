@@ -226,7 +226,7 @@ async def list_agents(
         # Count currently open tickets assigned to this agent
         open_tickets = await db.tickets.count_documents({
             "assigned_to": agent["_id"],
-            "status": {"$in": ["Open", "In Progress"]}
+            "status": {"$in": ["Open", "In Progress", "Waiting for User Response"]}
         })
         result.append({
             "id": agent["_id"],
