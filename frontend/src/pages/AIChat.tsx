@@ -49,8 +49,40 @@ export const AIChat: React.FC = () => {
   const [conversationStatus, setConversationStatus] = useState<'ACTIVE' | 'INVESTIGATING' | 'WAITING_FOR_USER' | 'LIKELY_RESOLVED' | 'ESCALATED' | 'RESOLVED'>('ACTIVE');
   const [guidedActions, setGuidedActions] = useState<string[]>([]);
   const [guidedState, setGuidedState] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const contentRef = useRef<HTMLDivElement>(null);
+  const isProcessingRef = useRef(false);
+  const conversationEndedRef = useRef(false);
+
+  const createWelcomeMessage = (): ChatMessage => ({
+    id: 'welcome',
+    sender: 'assistant',
+    text: "Hello! I am your Enterprise ITSM Helpdesk Copilot. I have real-time semantic access to the entire company knowledge base and active systems catalogs.\n\nHow can I help you today? Feel free to describe any issues (e.g., password lockouts, VPN connection errors, hardware procurement, or email sync setups).",
+    timestamp: new Date().toISOString()
+  });
+
+  const beginProcessing = () => {
+    if (isProcessingRef.current) return false;
+    isProcessingRef.current = true;
+    setIsProcessing(true);
+    return true;
+  };
+
+  const finishProcessing = () => {
+    isProcessingRef.current = false;
+    setIsProcessing(false);
+  };
+
+  const endConversation = () => {
+    conversationEndedRef.current = true;
+    setSessionId(null);
+    setSuggestedTicket(null);
+    setActiveSatisfactionCard(null);
+    setConversationStatus('ESCALATED');
+    setGuidedActions([]);
+    setGuidedState(null);
+  };
 
   useEffect(() => {
     if (contentRef.current) {
@@ -59,13 +91,7 @@ export const AIChat: React.FC = () => {
   }, [messages, isTyping, typingText]);
 
   useEffect(() => {
-    const welcomeMsg: ChatMessage = {
-      id: 'welcome',
-      sender: 'assistant',
-      text: "Hello! I am your Enterprise ITSM Helpdesk Copilot. I have real-time semantic access to the entire company knowledge base and active systems catalogs.\n\nHow can I help you today? Feel free to describe any issues (e.g., password lockouts, VPN connection errors, hardware procurement, or email sync setups).",
-      timestamp: new Date().toISOString()
-    };
-    setMessages([welcomeMsg]);
+    setMessages([createWelcomeMessage()]);
 
     const state = location.state as { initialPrompt?: string };
     if (state?.initialPrompt) {
@@ -78,7 +104,8 @@ export const AIChat: React.FC = () => {
     let index = 0;
     const speed = 15;
 
-    const typeChar = () => {
+    await new Promise<void>((resolve) => {
+      const typeChar = () => {
       if (index < text.length) {
         setTypingText(prev => prev + text.charAt(index));
         index++;
@@ -93,14 +120,28 @@ export const AIChat: React.FC = () => {
         };
         setMessages(prev => [...prev, botMsg]);
         setIsTyping(false);
+        resolve();
       }
-    };
+      };
 
-    typeChar();
+      typeChar();
+    });
   };
 
   const handleSendPrompt = async (textToSend: string) => {
-    if (!textToSend.trim()) return;
+    if (!textToSend.trim() || !beginProcessing()) return;
+
+    const isFreshQuery = conversationEndedRef.current;
+    conversationEndedRef.current = false;
+    if (isFreshQuery) {
+      setMessages([createWelcomeMessage()]);
+      setSessionId(null);
+      setSuggestedTicket(null);
+      setActiveSatisfactionCard(null);
+      setConversationStatus('ACTIVE');
+      setGuidedActions([]);
+      setGuidedState(null);
+    }
 
     const userMsg: ChatMessage = {
       id: `usr_${Date.now()}`,
@@ -114,7 +155,7 @@ export const AIChat: React.FC = () => {
     setIsTyping(true);
 
     try {
-      const chatHistory = messages.map(msg => ({
+      const chatHistory = (isFreshQuery ? [] : messages).map(msg => ({
         role: msg.sender === 'user' ? 'user' : 'assistant',
         content: msg.text
       }));
@@ -134,10 +175,11 @@ export const AIChat: React.FC = () => {
 
       // Satisfaction is now driven by the backend conversation tracker, NOT
       // by searching the answer for plain-text prompts.
-      setGuidedActions(response.guided_actions || []);
+      const ticketAlreadyCreated = Boolean(response.ticket_id);
+      setGuidedActions(ticketAlreadyCreated ? [] : (response.guided_actions || []));
       setGuidedState(response.guided_state || null);
 
-      if (!response.guided_state && response.satisfaction_card?.show && !activeSatisfactionCard) {
+      if (!ticketAlreadyCreated && !response.guided_state && response.satisfaction_card?.show && !activeSatisfactionCard) {
         setActiveSatisfactionCard(response.satisfaction_card);
         if (response.satisfaction_card.reason === 'POSITIVE_TREND') {
           setConversationStatus('LIKELY_RESOLVED');
@@ -146,7 +188,7 @@ export const AIChat: React.FC = () => {
         }
       }
 
-      simulateTyping(response.answer, `bot_${Date.now()}`);
+      await simulateTyping(response.answer, `bot_${Date.now()}`);
 
       if (response.suggested_ticket) {
         setSuggestedTicket({
@@ -179,12 +221,17 @@ export const AIChat: React.FC = () => {
         timestamp: new Date().toISOString()
       };
       setMessages(prev => [...prev, errorMsg]);
+      setGuidedActions([]);
+      setActiveSatisfactionCard(null);
+      setTypingText('');
       setIsTyping(false);
+    } finally {
+      finishProcessing();
     }
   };
 
   const handleGuidedYes = async () => {
-    if (!sessionId || isFeedbackLoading) return;
+    if (!sessionId || isFeedbackLoading || !beginProcessing()) return;
     setIsFeedbackLoading(true);
     try {
       const feedbackResult = await submitAIChatFeedback(sessionId, 'positive');
@@ -213,10 +260,12 @@ export const AIChat: React.FC = () => {
       console.error('[Guided Resolution] Failed:', error);
     } finally {
       setIsFeedbackLoading(false);
+      finishProcessing();
     }
   };
 
   const handleGuidedNo = () => {
+    if (isProcessingRef.current) return;
     setActiveSatisfactionCard(null);
     handleSendPrompt('No');
   };
@@ -225,7 +274,7 @@ export const AIChat: React.FC = () => {
   const [isFeedbackLoading, setIsFeedbackLoading] = useState(false);
 
   const handleConvertTicket = async () => {
-    if (!suggestedTicket || !sessionId || isEscalating) return;
+    if (!suggestedTicket || !sessionId || isEscalating || !beginProcessing()) return;
 
     setIsEscalating(true);
     setIsTyping(true);
@@ -250,6 +299,9 @@ export const AIChat: React.FC = () => {
       };
 
       setMessages(prev => [...prev, confirmationMsg]);
+      setGuidedActions([]);
+      setActiveSatisfactionCard(null);
+      endConversation();
       setIsTyping(false);
       setIsEscalating(false);
     } catch (error) {
@@ -264,11 +316,13 @@ export const AIChat: React.FC = () => {
       setMessages(prev => [...prev, errorMsg]);
       setIsTyping(false);
       setIsEscalating(false);
+    } finally {
+      finishProcessing();
     }
   };
 
   const handleSatisfactionResolved = async () => {
-    if (!activeSatisfactionCard || isFeedbackLoading) return;
+    if (!activeSatisfactionCard || isFeedbackLoading || !beginProcessing()) return;
     const sid = activeSatisfactionCard.session_id || sessionId;
     setIsFeedbackLoading(true);
     try {
@@ -286,11 +340,12 @@ export const AIChat: React.FC = () => {
       console.error('[Satisfaction Feedback] Failed:', error);
     } finally {
       setIsFeedbackLoading(false);
+      finishProcessing();
     }
   };
 
   const handleSatisfactionCreateTicket = async () => {
-    if (isFeedbackLoading) return;
+    if (isFeedbackLoading || !beginProcessing()) return;
     const sid = activeSatisfactionCard?.session_id || sessionId;
     setIsFeedbackLoading(true);
     setIsEscalating(true);
@@ -304,9 +359,7 @@ export const AIChat: React.FC = () => {
         // No pre-generated suggested_ticket? Call escalateToTicket directly anyway.
         // The endpoint will generate one from chat history.
       }
-      if (suggestedTicket && sid) {
-        await handleConvertTicket();
-      } else if (sid) {
+      if (sid) {
         const newTicket = await escalateToTicket(sid, 'AI could not resolve; user requested ticket from satisfaction card.');
         await loadTickets();
         const confirmationMsg: ChatMessage = {
@@ -316,8 +369,10 @@ export const AIChat: React.FC = () => {
           timestamp: new Date().toISOString()
         };
         setMessages(prev => [...prev, confirmationMsg]);
+        setGuidedActions([]);
+        setGuidedState(null);
+        endConversation();
       }
-      setConversationStatus('ESCALATED');
       setActiveSatisfactionCard(null);
       setSuggestedTicket(null);
     } catch (error) {
@@ -334,6 +389,7 @@ export const AIChat: React.FC = () => {
       setIsFeedbackLoading(false);
       setIsEscalating(false);
       setIsTyping(false);
+      finishProcessing();
     }
   };
 
@@ -424,12 +480,12 @@ export const AIChat: React.FC = () => {
   };
 
   const renderGuidedActions = () => {
-    if (guidedActions.length < 2 || guidedState === 'RESOLVED' || guidedState === 'NO_SOLUTION') return null;
+    if (isProcessing || suggestedTicket?.ticketId || guidedActions.length < 2 || guidedState === 'RESOLVED' || guidedState === 'NO_SOLUTION') return null;
     return (
       <div className="flex justify-center mt-2">
         <div className="max-w-xl w-full flex gap-2">
           <button
-            disabled={isFeedbackLoading || isTyping}
+            disabled={isProcessing || isFeedbackLoading || isTyping}
             onClick={handleGuidedYes}
             className="flex-1 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 border transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ backgroundColor: tokens.statusSuccessBg, color: tokens.statusSuccess, borderColor: `${tokens.statusSuccess}55` }}
@@ -438,7 +494,7 @@ export const AIChat: React.FC = () => {
             Yes, resolved
           </button>
           <button
-            disabled={isFeedbackLoading || isTyping}
+            disabled={isProcessing || isFeedbackLoading || isTyping}
             onClick={handleGuidedNo}
             className="flex-1 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 border transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ backgroundColor: tokens.statusWarningBg, color: 'var(--text-primary)', borderColor: `${tokens.statusWarning}55` }}
@@ -475,7 +531,8 @@ export const AIChat: React.FC = () => {
           </div>
           <button 
             onClick={() => {
-              setMessages([messages[0]]);
+              if (isProcessingRef.current) return;
+              setMessages([createWelcomeMessage()]);
               setSuggestedTicket(null);
               setSessionId(null);
               setCollapsedMessages({});
@@ -483,7 +540,9 @@ export const AIChat: React.FC = () => {
               setConversationStatus('ACTIVE');
               setGuidedActions([]);
               setGuidedState(null);
+              conversationEndedRef.current = false;
             }}
+            disabled={isProcessing}
             className="p-1.5 rounded-lg transition-all text-[10px] flex items-center gap-1.5 cursor-pointer border"
             style={{ backgroundColor: 'var(--card-bg-solid)', color: 'var(--text-secondary)', borderColor: 'var(--border)' }}
             onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--hover)'; e.currentTarget.style.color = 'var(--text-primary)'; }}
@@ -760,8 +819,9 @@ export const AIChat: React.FC = () => {
                 placeholder="Ask IT support or troubleshoot connection problems..."
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
+                disabled={isProcessing}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
+                  if (!isProcessing && e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
                     handleSendPrompt(input);
                   }
@@ -772,6 +832,7 @@ export const AIChat: React.FC = () => {
               />
               <button 
                 onClick={() => handleSendPrompt(input)}
+                disabled={isProcessing}
                 className="p-2 rounded-xl transition-all shrink-0 cursor-pointer ml-2"
                 style={{ backgroundColor: tokens.accentPrimary, color: 'var(--accent-primary-contrast)' }}
                 onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.9'; }}
