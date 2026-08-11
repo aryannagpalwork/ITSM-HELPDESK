@@ -7,7 +7,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import api_router
 from app.config.logging import configure_logging
 from app.config.settings import get_settings
-from app.database.mongodb import get_database, close_connection, ensure_indexes, reconcile_agent_workloads
+from app.database.mongodb import (
+    close_connection,
+    ensure_indexes,
+    get_database,
+    normalize_ticket_statuses,
+    reconcile_agent_workloads,
+)
 from app.database.seed import seed_demo_data
 from app.services.anomaly_scheduler import start_scheduler, stop_scheduler
 
@@ -25,6 +31,7 @@ async def lifespan(app: FastAPI):
     try:
         await ensure_indexes(db)
         await seed_demo_data(db)
+        await normalize_ticket_statuses(db)
         await reconcile_agent_workloads(db)
         logger.info("Demo data seeded successfully")
     except Exception as e:

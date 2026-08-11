@@ -12,8 +12,9 @@ export const TicketStatusOverviewStepper: React.FC<TicketStatusOverviewStepperPr
   const [activeStep, setActiveStep] = useState(0);
   const steps = useMemo<StatusStep[]>(() => {
     const waiting = tickets.filter(ticket =>
-      (ticket.status === 'open' || ticket.status === 'in_progress')
-      && (ticket.awaitingCustomerResponse === true || /waiting|customer response|reply required|input needed|detail required|information needed/.test(`${ticket.title} ${ticket.description}`.toLowerCase()))
+      ticket.status === 'waiting_for_user_response'
+      || ((ticket.status === 'open' || ticket.status === 'in_progress')
+        && (ticket.awaitingCustomerResponse === true || /waiting|customer response|reply required|input needed|detail required|information needed/.test(`${ticket.title} ${ticket.description}`.toLowerCase())))
     );
     return [
       { label: 'Submitted', count: tickets.filter(ticket => ticket.status === 'open' && !waiting.includes(ticket)).length, filter: 'open', view: 'submitted', detail: 'Tickets submitted and waiting for service desk action.', color: '#38bdf8', icon: <FilePlus2 className="h-4 w-4" /> },

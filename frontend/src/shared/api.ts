@@ -222,7 +222,7 @@ interface BackendTicket {
   description: string;
   category: string;
   priority: 'Low' | 'Medium' | 'High' | 'Critical';
-  status: 'Open' | 'In Progress' | 'Resolved' | 'Closed';
+  status: 'Open' | 'In Progress' | 'Waiting for User Response' | 'Resolved' | 'Closed';
   awaiting_user_response?: boolean;
   assigned_to?: string;
   assigned_to_name?: string;
@@ -420,6 +420,7 @@ const statusToFrontend = (status: BackendTicket['status']): TicketStatus => {
   const map: Record<BackendTicket['status'], TicketStatus> = {
     Open: 'open',
     'In Progress': 'in_progress',
+    'Waiting for User Response': 'waiting_for_user_response',
     Resolved: 'resolved',
     Closed: 'closed',
   };

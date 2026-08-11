@@ -104,17 +104,18 @@ export const TicketDashboard: React.FC = () => {
     const matchesPriority = priorityFilter === 'all' || ticket.priority === priorityFilter;
 
     const ticketText = `${ticket.title} ${ticket.description} ${ticket.category || ''}`.toLowerCase();
-    const awaitingResponse = ticket.awaitingCustomerResponse === true
+    const awaitingResponse = ticket.status === 'waiting_for_user_response'
+      || ticket.awaitingCustomerResponse === true
       || /customer|response|reply|wait(?:ing|ed)|detail required|information needed|input needed/.test(ticketText);
     const matchesView = (() => {
       if (ticketView === 'awaiting-response') {
-        return (ticket.status === 'open' || ticket.status === 'in_progress') && awaitingResponse;
+        return (ticket.status === 'open' || ticket.status === 'in_progress' || ticket.status === 'waiting_for_user_response') && awaitingResponse;
       }
       if (ticketView === 'submitted') {
         return ticket.status === 'open' && !awaitingResponse;
       }
       if (ticketView === 'assigned-open') {
-        return ticket.status === 'open' || ticket.status === 'in_progress';
+        return ticket.status === 'open' || ticket.status === 'in_progress' || ticket.status === 'waiting_for_user_response';
       }
       if (ticketView === 'sla-due-today') {
         return isSameDay(ticket.slaDueAt) && isBreached(ticket);
@@ -184,6 +185,7 @@ export const TicketDashboard: React.FC = () => {
     switch (status) {
       case 'open': return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
       case 'in_progress': return 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20';
+      case 'waiting_for_user_response': return 'bg-amber-500/10 text-amber-400 border border-amber-500/20';
       case 'resolved': return 'bg-sky-500/10 text-sky-400 border border-sky-500/20';
       case 'closed': return 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20';
     }
@@ -245,6 +247,7 @@ export const TicketDashboard: React.FC = () => {
               <option value="all">All statuses</option>
               <option value="open">Open</option>
               <option value="in_progress">In Progress</option>
+              <option value="waiting_for_user_response">Waiting for User Response</option>
               <option value="resolved">Resolved</option>
               <option value="closed">Closed</option>
               {currentUser.role === 'Administrator' && <option value="resolved_ai">Resolved by AI</option>}

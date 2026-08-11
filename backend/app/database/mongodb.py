@@ -90,6 +90,19 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     ])
 
 
+async def normalize_ticket_statuses(db: AsyncIOMotorDatabase) -> None:
+    """Replace the legacy status spelling with the public API enum value."""
+    result = await db.tickets.update_many(
+        {"status": "Waiting For User Response"},
+        {"$set": {"status": "Waiting for User Response"}},
+    )
+    if result.modified_count:
+        import logging
+        logging.getLogger(__name__).info(
+            "Normalized %s legacy ticket status value(s)", result.modified_count
+        )
+
+
 async def reconcile_agent_workloads(db: AsyncIOMotorDatabase) -> None:
     """Repair counters from source-of-truth tickets after deploys/upgrades."""
     pipeline = [
@@ -97,7 +110,7 @@ async def reconcile_agent_workloads(db: AsyncIOMotorDatabase) -> None:
         {"$group": {
             "_id": "$assigned_to",
             "assigned": {"$sum": 1},
-            "active": {"$sum": {"$cond": [{"$in": ["$status", ["Open", "In Progress"]]}, 1, 0]}},
+            "active": {"$sum": {"$cond": [{"$in": ["$status", ["Open", "In Progress", "Waiting for User Response"]]}, 1, 0]}},
             "resolved": {"$sum": {"$cond": [{"$in": ["$status", ["Resolved", "Closed"]]}, 1, 0]}},
         }},
     ]

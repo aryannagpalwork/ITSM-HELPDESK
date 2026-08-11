@@ -283,6 +283,8 @@ export const TicketDetails: React.FC = () => {
         return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
       case 'in_progress':
         return 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20';
+      case 'waiting_for_user_response':
+        return 'bg-amber-500/10 text-amber-400 border border-amber-500/20';
       case 'resolved':
         return 'bg-sky-500/10 text-sky-400 border border-sky-500/20';
       case 'closed':
@@ -780,6 +782,7 @@ export const TicketDetails: React.FC = () => {
                     >
                       <option value="open">Open</option>
                       <option value="in_progress">In Progress</option>
+                      <option value="waiting_for_user_response">Waiting for User Response</option>
                       <option value="resolved">Resolved</option>
                       <option value="closed">Closed</option>
                     </select>

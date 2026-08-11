@@ -19,7 +19,7 @@ export interface Department {
   name: string;
 }
 
-export type TicketStatus = 'open' | 'in_progress' | 'resolved' | 'closed';
+export type TicketStatus = 'open' | 'in_progress' | 'waiting_for_user_response' | 'resolved' | 'closed';
 export type TicketPriority = 'low' | 'medium' | 'high' | 'critical';
 
 export interface Ticket {
@@ -328,12 +328,12 @@ export interface AgentKPIs {
   resolvedToday: number;
   overdueTickets: number;
   mttrHours: number;
-  fcrRate: number;
+  agentFcrRate: number;
+  userSatisfaction: number;
   avgFirstResponseHours: number;
   resolutionRate: number;
   slaCompliance: number;
   reopenRate: number;
-  csatScore: number;
   aiCopilot: AICopilotAgentKPIs;
 }
 
@@ -350,8 +350,8 @@ export interface AdminKPIs {
   systemUsers: number;
   activeAgents: number;
   orgMttrHours: number;
-  orgFcrRate: number;
-  orgCsatScore: number;
+  orgAgentFcrRate: number;
+  userSatisfaction: number;
   slaCompliance: number;
   slaBreaches: number;
   activeSlaTickets: number;
