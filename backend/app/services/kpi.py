@@ -169,6 +169,105 @@ async def _get_first_response_map(
     return result
 
 
+async def _get_ticket_comment_summary(
+    db: AsyncIOMotorDatabase, ticket_ids: list[str]
+) -> dict[str, dict[str, int]]:
+    if not ticket_ids:
+        return {}
+    ticket_rows = await db.tickets.find(
+        {"_id": {"$in": ticket_ids}, "comments": {"$exists": True, "$ne": []}},
+        {"_id": 1, "comments": 1},
+    ).to_list(length=None)
+
+    ticket_comment_map: dict[str, list[Any]] = {}
+    for ticket in ticket_rows:
+        if ticket.get("comments"):
+            ticket_comment_map[ticket["_id"]] = ticket["comments"]
+
+    def normalize_comment_id(reference: Any) -> Any | None:
+        if isinstance(reference, dict):
+            reference = reference.get("_id", reference.get("id"))
+        if reference is None:
+            return None
+        try:
+            hash(reference)
+        except TypeError:
+            return None
+        return reference
+
+    normalized_map: dict[str, list[Any]] = {}
+    for ticket_id, references in ticket_comment_map.items():
+        normalized_map[ticket_id] = [
+            comment_id
+            for reference in references
+            if (comment_id := normalize_comment_id(reference)) is not None
+        ]
+
+    all_comment_ids = list({cid for ids in normalized_map.values() for cid in ids})
+    if not all_comment_ids:
+        return {}
+
+    comments = await db.ticket_comments.find(
+        {"_id": {"$in": all_comment_ids}},
+    ).to_list(length=None)
+    comment_by_id = {c["_id"]: c for c in comments}
+
+    summary: dict[str, dict[str, int]] = {}
+    for ticket_id, cids in normalized_map.items():
+        public_support_comments = 0
+        ai_support_comments = 0
+        agent_support_comments = 0
+        for cid in cids:
+            comment = comment_by_id.get(cid)
+            if not comment or comment.get("is_internal") is True:
+                continue
+            author_role = str(comment.get("author_role") or "").strip().lower()
+            if author_role in {"agent", "administrator", "admin"}:
+                public_support_comments += 1
+                agent_support_comments += 1
+            elif author_role == "ai":
+                public_support_comments += 1
+                ai_support_comments += 1
+        summary[ticket_id] = {
+            "public_support_comments": public_support_comments,
+            "ai_support_comments": ai_support_comments,
+            "agent_support_comments": agent_support_comments,
+        }
+    return summary
+
+
+def _ticket_resolver_kind(ticket: dict) -> str | None:
+    if str(ticket.get("resolved_by") or "").strip().lower() == "ai":
+        return "ai"
+    if str(ticket.get("resolution_source") or "").strip().lower() == "ai":
+        return "ai"
+    if ticket.get("ai_resolved") is True:
+        return "ai"
+    if ticket.get("status") in {"Resolved", "Closed"}:
+        return "agent"
+    return None
+
+
+def _is_first_contact_resolution(ticket: dict, comment_summary: dict[str, int], resolver_kind: str) -> bool:
+    # First-contact resolution is treated as a ticket that reached a terminal
+    # state after at most one public support response, based on the visible
+    # interaction history rather than reopen/escalation proxies.
+    public_support_comments = int(comment_summary.get("public_support_comments", 0))
+    if resolver_kind == "ai":
+        return public_support_comments <= 1 and int(comment_summary.get("ai_support_comments", 0)) <= 1
+    if resolver_kind == "agent":
+        return public_support_comments <= 1 and int(comment_summary.get("agent_support_comments", 0)) <= 1
+    return False
+
+
+def _is_ai_resolved_ticket(ticket: dict) -> bool:
+    return (
+        ticket.get("ai_resolved") is True
+        or str(ticket.get("resolved_by") or "").strip().lower() == "ai"
+        or str(ticket.get("resolution_source") or "").strip().lower() == "ai"
+    )
+
+
 def _ai_conversation_is_resolved(conversation: dict) -> bool:
     if conversation.get("resolved_by_ai") is True:
         return True
@@ -333,6 +432,7 @@ async def compute_agent_kpis(
     reopen_counts = await _get_ticket_reopen_counts(db, ticket_ids)
     escalation_counts = await _get_ticket_escalation_counts(db, ticket_ids)
     first_resp_map = await _get_first_response_map(db, ticket_ids, responder_role="agent")
+    comment_summary = await _get_ticket_comment_summary(db, ticket_ids)
 
     overdue = 0
     sla_compliant = 0
@@ -364,12 +464,14 @@ async def compute_agent_kpis(
 
     mttr = _round1(mttr_total / mttr_n) if mttr_n else 0.0
 
-    fcr_n = 0
+    agent_fcr_n = 0
     for t in resolved_closed:
         tid = t["_id"]
-        if reopen_counts.get(tid, 0) == 0 and escalation_counts.get(tid, 0) == 0:
-            fcr_n += 1
-    fcr = _pct(fcr_n, resolved_count)
+        resolver_kind = _ticket_resolver_kind(t)
+        if _is_first_contact_resolution(t, comment_summary.get(tid, {}), resolver_kind or "") and resolver_kind == "agent":
+            agent_fcr_n += 1
+    agent_fcr = _pct(agent_fcr_n, resolved_count)
+    user_satisfaction = _pct(sum(1 for t in tickets if _is_ai_resolved_ticket(t)), len(tickets))
 
     fr_total = 0.0
     fr_n = 0
@@ -387,14 +489,6 @@ async def compute_agent_kpis(
 
     total_reopens = sum(reopen_counts.values())
     reopen_rate = _pct(total_reopens, resolved_count)
-
-    # Derived CSAT proxy (same blend as the org-level admin score): FCR, SLA
-    # adherence, and inverse reopen rate stand in for missing survey data.
-    if resolved_count:
-        csat_raw = 0.5 * fcr + 0.3 * sla_compliance_pct + 0.2 * (100 - reopen_rate)
-        csat_score = _round1(min(100.0, max(0.0, csat_raw)))
-    else:
-        csat_score = 0.0
 
     ai = AICopilotAgentKPIs(
         suggestionsGenerated=max(0, resolved_count * 2),
@@ -414,12 +508,12 @@ async def compute_agent_kpis(
         resolvedToday=resolved_today,
         overdueTickets=overdue,
         mttrHours=mttr,
-        fcrRate=fcr,
+        agentFcrRate=agent_fcr,
+        userSatisfaction=user_satisfaction,
         avgFirstResponseHours=avg_first_response,
         resolutionRate=resolution_rate,
         slaCompliance=sla_compliance_pct,
         reopenRate=reopen_rate,
-        csatScore=csat_score,
         aiCopilot=ai,
     )
 
@@ -442,6 +536,7 @@ async def compute_admin_kpis(db: AsyncIOMotorDatabase) -> AdminKPIs:
     reopen_counts = await _get_ticket_reopen_counts(db, ticket_ids)
     escalation_counts = await _get_ticket_escalation_counts(db, ticket_ids)
     first_resp_map = await _get_first_response_map(db, ticket_ids)
+    comment_summary = await _get_ticket_comment_summary(db, ticket_ids)
 
     mttr_total = 0.0
     mttr_n = 0
@@ -478,28 +573,21 @@ async def compute_admin_kpis(db: AsyncIOMotorDatabase) -> AdminKPIs:
 
     org_mttr = _round1(mttr_total / mttr_n) if mttr_n else 0.0
 
-    fcr_n = 0
+    agent_fcr_n = 0
     reopened_n = 0
     for t in resolved_closed:
         tid = t["_id"]
-        if reopen_counts.get(tid, 0) == 0 and escalation_counts.get(tid, 0) == 0:
-            fcr_n += 1
+        resolver_kind = _ticket_resolver_kind(t)
+        if _is_first_contact_resolution(t, comment_summary.get(tid, {}), resolver_kind or "") and resolver_kind == "agent":
+            agent_fcr_n += 1
         if reopen_counts.get(tid, 0) > 0:
             reopened_n += 1
-    org_fcr = _pct(fcr_n, resolved_count)
+    org_agent_fcr = _pct(agent_fcr_n, resolved_count)
+    user_satisfaction = _pct(sum(1 for t in tickets if _is_ai_resolved_ticket(t)), len(tickets))
     reopen_rate_pct = _pct(reopened_n, resolved_count)
 
     sla_compliance_pct = _pct(sla_compliant, sla_total) if sla_total else 100.0
     sla_breaches = max(0, sla_total - sla_compliant)
-
-    # Derived CSAT proxy: blend of first-contact resolution, SLA adherence, and
-    # (inverse) reopen rate. No survey data exists, so this approximates
-    # satisfaction from operational quality signals.
-    if resolved_count:
-        csat_raw = 0.5 * org_fcr + 0.3 * sla_compliance_pct + 0.2 * (100 - reopen_rate_pct)
-        org_csat = _round1(min(100.0, max(0.0, csat_raw)))
-    else:
-        org_csat = 0.0
 
     conversations = await _get_ai_conversation_rows(db)
     if conversations:
@@ -546,8 +634,8 @@ async def compute_admin_kpis(db: AsyncIOMotorDatabase) -> AdminKPIs:
         totalTickets=len(tickets),
         activeAgents=active_agents,
         orgMttrHours=org_mttr,
-        orgFcrRate=org_fcr,
-        orgCsatScore=org_csat,
+        orgAgentFcrRate=org_agent_fcr,
+        userSatisfaction=user_satisfaction,
         slaCompliance=sla_compliance_pct,
         slaBreaches=sla_breaches,
         activeSlaTickets=active_sla_tickets,

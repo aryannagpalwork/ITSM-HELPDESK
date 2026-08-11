@@ -23,14 +23,16 @@ from app.schemas.ticket import (
 from app.schemas.audit_log import AuditLogRead
 from app.services.sla import calculate_sla, snapshot_for_ticket
 
-ACTIVE_TICKET_STATUSES = {"Open", "In Progress", "Awaiting User Response"}
+ACTIVE_TICKET_STATUSES = {"Open", "In Progress", "Waiting for User Response", "Awaiting User Response"}
 DEFAULT_AGENT_CAPACITY = 10
 
 # Legacy/imported records may use workflow labels that are not part of the
 # public TicketStatus enum. Keep the API contract stable by mapping those
 # labels to the closest supported lifecycle state at serialization time.
+
 LEGACY_STATUS_ALIASES = {
-    "awaiting customer response": "Awaiting User Response",
+    "waiting for user response": "Waiting for User Response",
+    "awaiting customer response": "Open",
     "pending": "Open",
     "new": "Open",
 }
@@ -44,6 +46,7 @@ def normalize_ticket_status(value: object) -> str:
 
 def is_awaiting_user_response(value: object) -> bool:
     return str(value or "").strip().lower() in {
+        "waiting for user response",
         "awaiting user response",
         "awaiting customer response",
     }
@@ -702,7 +705,15 @@ async def list_tickets(
         ]
     
     if status_filter:
-        query["status"] = status_filter.replace("_", " ").title()
+        if status_filter.lower() == "resolved_ai":
+            query["status"] = {"$in": ["Resolved", "Closed"]}
+            query["$and"] = [{"$or": [
+                {"resolved_by": "AI"},
+                {"resolution_source": "AI"},
+                {"ai_resolved": True},
+            ]}]
+        else:
+            query["status"] = normalize_ticket_status(status_filter.replace("_", " ").title())
     
     if priority_filter:
         query["priority"] = priority_filter.title()
@@ -899,7 +910,7 @@ async def update_ticket(db: AsyncIOMotorDatabase, ticket_id: str, payload: Ticke
                            "status": update_data.get("status", ticket.get("status"))}
         await _set_assignment(db, assignment_view, requested_assignee, update_data["updated_at"])
     elif "status" in update_data and ticket.get("assigned_to"):
-        old_active = ticket.get("status") in ACTIVE_TICKET_STATUSES
+        old_active = normalize_ticket_status(ticket.get("status")) in ACTIVE_TICKET_STATUSES
         new_active = update_data["status"] in ACTIVE_TICKET_STATUSES
         if old_active != new_active:
             await _adjust_agent_workload(db, ticket["assigned_to"],

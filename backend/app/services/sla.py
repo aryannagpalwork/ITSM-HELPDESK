@@ -10,7 +10,7 @@ SLA_TARGET_HOURS: dict[str, float] = {
     "Medium": 24.0,
     "Low": 72.0,
 }
-ACTIVE_STATUSES = {"Open", "In Progress", "Awaiting User Response"}
+ACTIVE_STATUSES = {"Open", "In Progress", "Waiting for User Response", "Awaiting User Response"}
 TERMINAL_STATUSES = {"Resolved", "Closed"}
 
 
