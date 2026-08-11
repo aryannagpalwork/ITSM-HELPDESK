@@ -32,6 +32,7 @@ DEFAULT_AGENT_CAPACITY = 10
 
 LEGACY_STATUS_ALIASES = {
     "waiting for user response": "Waiting for User Response",
+    "awaiting user response": "Waiting for User Response",
     "awaiting customer response": "Open",
     "pending": "Open",
     "new": "Open",
