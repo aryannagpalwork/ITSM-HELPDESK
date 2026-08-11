@@ -25,9 +25,6 @@ from app.services.sla import calculate_sla, snapshot_for_ticket
 
 ACTIVE_TICKET_STATUSES = {"Open", "In Progress", "Awaiting User Response"}
 DEFAULT_AGENT_CAPACITY = 10
-logger = logging.getLogger(__name__)
-AI_RESOLUTION_SOURCE = "AI"
-IT_AGENT_RESOLUTION_SOURCE = "IT_AGENT"
 
 # Legacy/imported records may use workflow labels that are not part of the
 # public TicketStatus enum. Keep the API contract stable by mapping those
@@ -50,15 +47,6 @@ def is_awaiting_user_response(value: object) -> bool:
         "awaiting user response",
         "awaiting customer response",
     }
-
-
-def is_ai_resolved(ticket: dict) -> bool:
-    """Keep AI attribution intact when a resolved AI ticket is later viewed/closed."""
-    return (
-        ticket.get("ai_resolved") is True
-        or str(ticket.get("resolved_by") or "").strip().lower() == "ai"
-        or str(ticket.get("resolution_source") or "").strip().lower() == "ai"
-    )
 
 # Category vocabulary is intentionally small and explicit. It lets legacy
 # specialization names such as "Infrastructure Specialist" match modern
@@ -132,22 +120,54 @@ async def _notify_agent_employee_response(db: AsyncIOMotorDatabase, ticket: dict
     })
 
 
-async def _notify_assignment(db: AsyncIOMotorDatabase, ticket: dict, agent: dict) -> None:
-    """Persist assignment notifications for the agent and requester."""
+async def _notify_assignment(db: AsyncIOMotorDatabase, ticket: dict, agent: dict, *, is_reassignment: bool = False) -> None:
+    """Persist assignment notifications for the agent and requester.
+
+    Message branches on three things: whether the recipient IS the requester,
+    whether the requester is themself an agent, and whether this is a fresh
+    assignment vs. a reassignment (ticket moving from one agent to another).
+    """
     requester_id = ticket.get("created_by")
+    requester = await db.users.find_one({"_id": requester_id}) if requester_id else None
+    requester_is_agent = bool(requester and requester.get("role") == "agent")
+
     recipient_ids = [agent["_id"]]
     if requester_id and requester_id != agent["_id"]:
         recipient_ids.append(requester_id)
+
+    def _message_for(recipient_id: str) -> str:
+        is_requester = recipient_id == requester_id
+        is_assigned_agent = recipient_id == agent["_id"]
+
+        if is_reassignment:
+            if is_assigned_agent:
+                return f"Ticket {ticket['ticket_number']} has been reassigned to you."
+            # Requester side, reassignment happened
+            if requester_is_agent:
+                return f"Your ticket has been reassigned to {agent.get('name', 'another agent')}."
+            return "Your ticket has been reassigned to an IT agent."
+
+        # Fresh assignment (ticket creation path)
+        if is_requester and is_assigned_agent:
+            # Requester is the same person who ended up assigned (e.g. agent
+            # self-routed, or an employee's ticket auto-routed back to them
+            # in an edge case). Don't say "assigned to an IT agent" to the
+            # very agent it was assigned to.
+            return "Ticket has been created and assigned to you."
+        if is_requester and requester_is_agent:
+            # Requester is an agent, but a *different* agent got it.
+            return f"Your ticket has been created and assigned to {agent.get('name', 'another agent')}."
+        if is_requester:
+            # Requester is a regular employee.
+            return "Your ticket has been assigned to an IT agent."
+        # Recipient is the assigned agent, and they are not the requester.
+        return f"Ticket {ticket['ticket_number']} has been assigned to you."
 
     await db.notifications.insert_many([
         {
             "_id": str(uuid4()), "user_id": recipient_id, "type": "ticket.assigned",
             "ticket_id": ticket["_id"],
-            "message": (
-                "Ticket has been created." if recipient_id == agent["_id"] and requester_id == agent["_id"]
-                else f"Ticket {ticket['ticket_number']} has been assigned to you." if recipient_id == agent["_id"]
-                else "Your ticket has been assigned to an IT agent."
-            ),
+            "message": _message_for(recipient_id),
             "read": False, "created_at": datetime.utcnow(),
         }
         for recipient_id in recipient_ids
@@ -527,9 +547,6 @@ async def _serialize_ticket(ticket: dict, db: AsyncIOMotorDatabase) -> TicketRea
         created_by_name=creator.get("full_name") if creator else None,
         ai_summary=ticket.get("ai_summary"),
         resolution=ticket.get("resolution"),
-        resolved_by=ticket.get("resolved_by"),
-        resolution_source=ticket.get("resolution_source"),
-        ai_resolved=bool(ticket.get("ai_resolved", False)),
         created_at=created_at,
         updated_at=updated_at,
         comments=comments,
@@ -549,17 +566,7 @@ async def _serialize_ticket(ticket: dict, db: AsyncIOMotorDatabase) -> TicketRea
 
 
 
-async def create_ticket(
-    db: AsyncIOMotorDatabase,
-    payload: TicketCreate,
-    reason: str | None = None,
-    current_user: dict | None = None,
-    *,
-    resolved_by: str | None = None,
-    resolution_source: str | None = None,
-    ai_resolved: bool | None = None,
-    ai_conversation_id: str | None = None,
-) -> TicketRead:
+async def create_ticket(db: AsyncIOMotorDatabase, payload: TicketCreate, reason: str | None = None, current_user: dict | None = None) -> TicketRead:
     created_by_id = current_user["id"] if current_user else payload.created_by
     ticket_id = str(uuid4())
     
@@ -585,13 +592,6 @@ async def create_ticket(
         "created_by": created_by_id,
         "ai_summary": payload.ai_summary,
         "resolution": payload.resolution,
-        # Optional internal attribution fields. Normal ticket creation keeps
-        # the legacy shape; AI-resolved records can persist their attribution
-        # atomically in the same insert.
-        "resolved_by": resolved_by,
-        "resolution_source": resolution_source,
-        "ai_resolved": ai_resolved if ai_resolved is not None else False,
-        "ai_conversation_id": ai_conversation_id,
         # AI analysis fields
         "ai_analysis_category": payload.ai_analysis_category,
         "ai_analysis_priority": payload.ai_analysis_priority,
@@ -605,15 +605,6 @@ async def create_ticket(
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
     }
-    if ai_resolved is True:
-        # Keep the normal assignment fields populated without routing this
-        # terminal record to a human agent or changing agent capacity.
-        ticket["assigned_to"] = "AI Copilot"
-        ticket["assigned_at"] = ticket["created_at"]
-        ticket["assignment_type"] = "AI"
-        ticket["assignment_reason"] = "Resolved by AI Copilot"
-        ticket["resolution_type"] = "AI Resolved"
-        ticket["closed_at"] = ticket["created_at"]
     ticket.update(calculate_sla(
         priority=ticket["priority"],
         started_at=ticket["created_at"],
@@ -621,10 +612,9 @@ async def create_ticket(
         now=ticket["created_at"],
     ))
     reserved_automatically = False
-    # Resolved-by-AI records are historical records and must not enter the
-    # active agent assignment queue. Open/in-progress creation keeps the
-    # existing automatic routing behavior unchanged.
-    selected = await _select_agent(db, ticket) if ticket["status"] in ACTIVE_TICKET_STATUSES else None
+    # Creation is always automatic. The legacy assigned_to input is accepted
+    # for API compatibility but intentionally cannot bypass routing.
+    selected = await _select_agent(db, ticket)
     attempted = set()
     while selected and selected["_id"] not in attempted:
         attempted.add(selected["_id"])
@@ -638,35 +628,8 @@ async def create_ticket(
             reserved_automatically = ticket["status"] in ACTIVE_TICKET_STATUSES
             break
         selected = await _select_agent(db, ticket, attempted)
-    if ai_resolved is True:
-        logger.info(
-            "AI ticket creation called payload=%s ticket_id=%s ticket_number=%s",
-            {key: ticket.get(key) for key in (
-                "title", "description", "category", "priority", "created_by", "status",
-                "resolution_source", "resolution_type", "assigned_to", "assignment_type",
-                "ai_summary", "resolution", "ai_conversation_id",
-            )},
-            ticket_id,
-            ticket["ticket_number"],
-        )
-    try:
-        insert_result = await db.tickets.insert_one(ticket)
-    except Exception:
-        logger.exception(
-            "Ticket insert failed ticket_id=%s ticket_number=%s ai_resolved=%s",
-            ticket_id,
-            ticket.get("ticket_number"),
-            ai_resolved,
-        )
-        raise
-    if ai_resolved is True:
-        logger.info(
-            "AI ticket Mongo insert result inserted_id=%s document_id=%s ticket_number=%s",
-            insert_result.inserted_id,
-            ticket_id,
-            ticket["ticket_number"],
-        )
-    if ticket.get("assigned_to") and not ai_resolved:
+    await db.tickets.insert_one(ticket)
+    if ticket.get("assigned_to"):
         if ticket["status"] in ACTIVE_TICKET_STATUSES and not reserved_automatically:
             reserved = await _reserve_agent(db, ticket["assigned_to"], ticket["assigned_at"])
             if not reserved:
@@ -689,23 +652,20 @@ async def create_ticket(
         assigned_agent = await db.users.find_one({"_id": ticket["assigned_to"]})
         if assigned_agent:
             await _notify_assignment(db, ticket, assigned_agent)
-    if not ticket.get("assigned_to") and ticket["status"] in ACTIVE_TICKET_STATUSES:
+    if not ticket.get("assigned_to"):
         await _notify_unassigned_ticket(db, ticket)
     await _write_audit(
         db,
         action="ticket.created",
-        user_id=None if ai_resolved else created_by_id,
+        user_id=created_by_id,
         ticket_id=ticket_id,
-        reason=("Created by AI Copilot" if ai_resolved else reason),
+        reason=reason,
     )
 
-    # Trigger anomaly detection check on every ticket creation without closing
-    # the current window prematurely. The scheduler owns advancing the cursor
-    # once a full window has elapsed, so multiple tickets created in the same
-    # burst can still be counted together.
+    # Trigger anomaly detection check on every ticket creation
     try:
         from app.services.anomaly_scheduler import run_anomaly_detection
-        await run_anomaly_detection(db, advance_cursor=False)
+        await run_anomaly_detection(db)
     except Exception as exc:
         logger.warning("Anomaly detection on ticket create failed: %s", exc)
 
@@ -742,15 +702,7 @@ async def list_tickets(
         ]
     
     if status_filter:
-        if status_filter.lower() == "resolved_ai":
-            query["status"] = {"$in": ["Resolved", "Closed"]}
-            query["$and"] = [{"$or": [
-                {"resolved_by": "AI"},
-                {"resolution_source": "AI"},
-                {"ai_resolved": True},
-            ]}]
-        else:
-            query["status"] = status_filter.replace("_", " ").title()
+        query["status"] = status_filter.replace("_", " ").title()
     
     if priority_filter:
         query["priority"] = priority_filter.title()
@@ -769,27 +721,12 @@ async def list_tickets(
     
     # Apply role-based filtering
     if current_user["internal_role"] == "end_user":
-        # Normal tickets are owned by ``created_by``. AI-resolved tickets can
-        # also be linked through the conversation record (including legacy
-        # records created before the ticket attribution fields were added), so
-        # include those IDs without weakening employee isolation.
-        ai_conversations = await db["ai_conversations"].find(
-            {"user_id": current_user["id"], "ticket_id": {"$exists": True, "$ne": None}},
-            {"ticket_id": 1},
-        ).to_list(length=None)
-        linked_ai_ticket_ids = [row.get("ticket_id") for row in ai_conversations if row.get("ticket_id")]
-        ownership_filter = [{"created_by": current_user["id"]}]
-        if linked_ai_ticket_ids:
-            ownership_filter.append({"_id": {"$in": linked_ai_ticket_ids}})
-        query.setdefault("$and", []).append({"$or": ownership_filter})
+        query["created_by"] = current_user["id"]
     elif current_user["internal_role"] == "agent":
-        # Agents retain their assigned-ticket visibility. Include terminal
-        # AI-resolved records as read-only history so they appear wherever
-        # resolved tickets are displayed, without entering agent workload.
-        query.setdefault("$and", []).append({"$or": [
-            {"assigned_to": current_user["id"]},
-            {"ai_resolved": True, "status": {"$in": ["Resolved", "Closed"]}},
-        ]})
+        # Agents can only see tickets explicitly assigned to themselves.
+        # Keep the assignment parameter for API compatibility, but do not
+        # allow it to broaden visibility to the unassigned queue.
+        query["assigned_to"] = current_user["id"]
     
     # Sorting
     sort_direction = 1 if sort_order == SortOrder.asc else -1
@@ -940,22 +877,9 @@ async def update_ticket(db: AsyncIOMotorDatabase, ticket_id: str, payload: Ticke
         if next_status in {"Resolved", "Closed"}:
             next_ticket["resolved_at"] = ticket.get("resolved_at") or update_data["updated_at"]
             update_data.setdefault("resolved_at", next_ticket["resolved_at"])
-            # A normal lifecycle update is an IT-agent resolution. Preserve the
-            # explicit AI attribution on tickets already resolved by Copilot.
-            if not is_ai_resolved(ticket):
-                update_data.update({
-                    "resolved_by": "IT Agent",
-                    "resolution_source": IT_AGENT_RESOLUTION_SOURCE,
-                    "ai_resolved": False,
-                })
         elif next_status in ACTIVE_TICKET_STATUSES:
             next_ticket["resolved_at"] = None
-            update_data.update({
-                "resolved_at": None,
-                "resolved_by": None,
-                "resolution_source": None,
-                "ai_resolved": False,
-            })
+            update_data["resolved_at"] = None
         update_data.update(snapshot_for_ticket(next_ticket, update_data["updated_at"]))
 
     assignment_changed = "assigned_to" in update_data and update_data["assigned_to"] != ticket.get("assigned_to")
@@ -1029,6 +953,13 @@ async def assign_ticket(db: AsyncIOMotorDatabase, ticket_id: str, assigned_to: s
     await _set_assignment(db, ticket, assigned_to, now)
     await db.tickets.update_one({"_id": ticket_id}, {"$set": {"updated_at": now}})
 
+    # Notify the newly (re)assigned agent — and the requester, if applicable.
+    # This covers both a first manual assignment (ticket was previously
+    # unassigned) and a reassignment (moving from one agent to another).
+    # Unassignment (assigned_to is None) has nothing to notify.
+    if assigned_to and target_agent:
+        await _notify_assignment(db, {**ticket, "assigned_to": assigned_to}, target_agent, is_reassignment=is_reassign)
+
     if is_reassign:
         await _write_audit(
             db,
@@ -1087,14 +1018,7 @@ async def resolve_ticket(db: AsyncIOMotorDatabase, ticket_id: str, resolution: s
     old_status = ticket["status"]
     old_resolution = ticket.get("resolution")
     resolved_at = datetime.utcnow()
-    update_data = {
-        "status": "Resolved",
-        "resolved_at": resolved_at,
-        "updated_at": resolved_at,
-        "resolved_by": "IT Agent",
-        "resolution_source": IT_AGENT_RESOLUTION_SOURCE,
-        "ai_resolved": False,
-    }
+    update_data = {"status": "Resolved", "resolved_at": resolved_at, "updated_at": resolved_at}
     if resolution:
         update_data["resolution"] = resolution
     update_data.update(snapshot_for_ticket({**ticket, **update_data}, resolved_at))
@@ -1132,12 +1056,6 @@ async def close_ticket(db: AsyncIOMotorDatabase, ticket_id: str, current_user_id
     closed_at = datetime.utcnow()
     close_update = {"status": "Closed", "updated_at": closed_at,
                     "resolved_at": ticket.get("resolved_at") or closed_at}
-    if not is_ai_resolved(ticket):
-        close_update.update({
-            "resolved_by": "IT Agent",
-            "resolution_source": IT_AGENT_RESOLUTION_SOURCE,
-            "ai_resolved": False,
-        })
     close_update.update(snapshot_for_ticket({**ticket, **close_update}, closed_at))
     await db.tickets.update_one({"_id": ticket_id}, {"$set": close_update})
     if old_status in ACTIVE_TICKET_STATUSES and ticket.get("assigned_to"):
@@ -1161,14 +1079,7 @@ async def reopen_ticket(db: AsyncIOMotorDatabase, ticket_id: str, current_user_i
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found.")
     old_status = ticket["status"]
     reopened_at = datetime.utcnow()
-    reopen_update = {
-        "status": "In Progress",
-        "updated_at": reopened_at,
-        "resolved_at": None,
-        "resolved_by": None,
-        "resolution_source": None,
-        "ai_resolved": False,
-    }
+    reopen_update = {"status": "In Progress", "updated_at": reopened_at, "resolved_at": None}
     reopen_update.update(snapshot_for_ticket({**ticket, **reopen_update}, reopened_at))
     await db.tickets.update_one({"_id": ticket_id}, {"$set": reopen_update})
     if old_status not in ACTIVE_TICKET_STATUSES and ticket.get("assigned_to"):

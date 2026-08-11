@@ -1,10 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useApp } from '../shared/AppContext';
+import { useChat } from '../shared/ChatContext';
 import { useTheme } from '../shared/ThemeContext';
-import { ChatMessage, TicketPriority } from '../shared/types';
-import { sendChat, escalateToTicket, submitAIChatFeedback } from '../shared/api';
-import type { SatisfactionCard } from '../shared/types';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -27,7 +24,6 @@ import {
 export const AIChat: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { createTicket, loadTickets } = useApp();
   const { tokens } = useTheme();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -506,6 +502,7 @@ export const AIChat: React.FC = () => {
       </div>
     );
   };
+
 
   return (
     <div id="ai-chat-container" className="flex-1 flex h-full font-sans" style={{ backgroundColor: 'var(--app-bg)' }}>
