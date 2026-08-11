@@ -22,9 +22,18 @@ class LeaveRequestCreate(BaseModel):
     def normalize_reason(cls, value: str) -> str:
         return value.strip()
 
+    @field_validator("start_date")
+    @classmethod
+    def validate_start_date_is_not_in_the_past(cls, value: date) -> date:
+        if value < date.today():
+            raise ValueError("start_date must be today or a future date")
+        return value
+
     @field_validator("end_date")
     @classmethod
     def validate_date_range(cls, value: date, info) -> date:
+        if value < date.today():
+            raise ValueError("end_date must be today or a future date")
         start_date = info.data.get("start_date")
         if start_date and value < start_date:
             raise ValueError("end_date must be on or after start_date")
@@ -59,6 +68,8 @@ class AgentAvailabilityRead(ORMBase):
     name: str
     on_leave_today: bool
     open_ticket_count: int
+    department: str | None = None
+    specialization: list[str] | str | None = None
 
 
 class CurrentlyOnLeaveRead(ORMBase):

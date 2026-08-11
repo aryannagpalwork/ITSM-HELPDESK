@@ -222,7 +222,7 @@ interface BackendTicket {
   description: string;
   category: string;
   priority: 'Low' | 'Medium' | 'High' | 'Critical';
-  status: 'Open' | 'In Progress' | 'Waiting for User Response' | 'Resolved' | 'Closed';
+  status: 'Open' | 'In Progress' | 'Awaiting User Response' | 'Waiting for User Response' | 'Resolved' | 'Closed';
   awaiting_user_response?: boolean;
   assigned_to?: string;
   assigned_to_name?: string;
@@ -283,6 +283,8 @@ interface BackendAgentAvailability {
   name: string;
   on_leave_today: boolean;
   open_ticket_count: number;
+  department?: string | null;
+  specialization?: string | string[] | null;
 }
 
 interface BackendCurrentlyOnLeave {
@@ -314,6 +316,7 @@ interface BackendUserWithStatus extends BackendUser {
   status: string;
   is_active: boolean;
   created_at: string;
+  specialization?: string | string[] | null;
 }
 
 interface TokenResponse {
@@ -416,15 +419,23 @@ const extractErrorFromResponse = async (response: Response): Promise<string> => 
   }
 };
 
-const statusToFrontend = (status: BackendTicket['status']): TicketStatus => {
-  const map: Record<BackendTicket['status'], TicketStatus> = {
-    Open: 'open',
-    'In Progress': 'in_progress',
-    'Waiting for User Response': 'waiting_for_user_response',
-    Resolved: 'resolved',
-    Closed: 'closed',
+const statusToFrontend = (
+  status: BackendTicket['status'],
+  awaitingUserResponse = false,
+): TicketStatus => {
+  if (awaitingUserResponse) return 'waiting_for_user_response';
+
+  const normalized = String(status || 'Open').trim().toLowerCase().replace(/_/g, ' ');
+  const map: Record<string, TicketStatus> = {
+    open: 'open',
+    'in progress': 'in_progress',
+    'waiting for user response': 'waiting_for_user_response',
+    'awaiting user response': 'waiting_for_user_response',
+    'awaiting customer response': 'waiting_for_user_response',
+    resolved: 'resolved',
+    closed: 'closed',
   };
-  return map[status] || 'open';
+  return map[normalized] || 'open';
 };
 
 const priorityToFrontend = (priority: BackendTicket['priority']): TicketPriority => {
@@ -471,7 +482,7 @@ const mapRole = (role: string): 'Employee' | 'Agent' | 'Administrator' => {
   return roleMap[role] || 'Employee';
 };
 
-export const listPendingUsers = async (): Promise<(User & { status: string; email: string; createdAt: string })[]> => {
+export const listPendingUsers = async (): Promise<(User & { status: string; email: string; createdAt: string; specialization?: string | string[] | null })[]> => {
   const response = await apiFetch(`${API_BASE_URL}/admin/users/pending`);
   if (!response.ok) {
     throw new Error(`Unable to fetch pending users: ${response.status}`);
@@ -484,6 +495,7 @@ export const listPendingUsers = async (): Promise<(User & { status: string; emai
     role: mapRole(u.role),
     status: u.status,
     createdAt: u.created_at,
+    specialization: u.specialization,
   }));
 };
 
@@ -523,18 +535,20 @@ export const deactivateUser = async (userId: string): Promise<void> => {
   }
 };
 
-export const createUser = async (fullName: string, email: string, role: string, department?: string, password?: string): Promise<string> => {
+export const createUser = async (fullName: string, email: string, role: string, department?: string, password?: string, specialization?: string[]): Promise<string> => {
   const userPassword = password || generateRandomPassword();
+  const body: Record<string, any> = {
+    full_name: fullName,
+    email,
+    role,
+    password: userPassword,
+  };
+  if (department) body.department = department;
+  if (specialization && specialization.length) body.specialization = specialization;
   const response = await apiFetch(`${API_BASE_URL}/admin/users`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      full_name: fullName,
-      email,
-      role,
-      department: department || undefined,
-      password: userPassword,
-    }),
+    body: JSON.stringify(body),
   });
   if (!response.ok) {
     const errorMessage = await extractErrorFromResponse(response);
@@ -552,11 +566,12 @@ function generateRandomPassword(length: number = 16): string {
   return password;
 }
 
-export const updateUser = async (userId: string, fullName?: string, department?: string, role?: string): Promise<void> => {
-  const body: Record<string, string> = {};
+export const updateUser = async (userId: string, fullName?: string, department?: string, role?: string, specialization?: string[]): Promise<void> => {
+  const body: Record<string, any> = {};
   if (fullName) body.full_name = fullName;
   if (department) body.department = department;
   if (role) body.role = role;
+  if (specialization) body.specialization = specialization;
 
   const response = await apiFetch(`${API_BASE_URL}/admin/users/${userId}`, {
     method: 'PATCH',
@@ -590,7 +605,7 @@ export const changeUserRole = async (userId: string, role: string): Promise<void
   }
 };
 
-export const listAllUsers = async (includeDeleted: boolean = false): Promise<(User & { status: string; email: string; createdAt: string; is_active: boolean })[]> => {
+export const listAllUsers = async (includeDeleted: boolean = false): Promise<(User & { status: string; email: string; createdAt: string; is_active: boolean; specialization?: string | string[] | null })[]> => {
   const params = new URLSearchParams();
   if (includeDeleted) params.set('include_deleted', 'true');
   const url = params.toString() ? `${API_BASE_URL}/admin/users?${params.toString()}` : `${API_BASE_URL}/admin/users`;
@@ -607,14 +622,15 @@ export const listAllUsers = async (includeDeleted: boolean = false): Promise<(Us
     status: u.status,
     is_active: u.is_active,
     createdAt: u.created_at,
+    specialization: u.specialization,
   }));
 };
 
-export const register = async (fullName: string, email: string, password: string, role: string): Promise<{ message: string }> => {
+export const register = async (fullName: string, email: string, password: string, role: string, department?: string, specialization?: string[]): Promise<{ message: string }> => {
   const response = await fetch(`${API_BASE_URL}/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ full_name: fullName, email, password, role }),
+    body: JSON.stringify({ full_name: fullName, email, password, role, department: department || undefined, specialization: specialization && specialization.length ? specialization : undefined }),
   });
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ detail: 'Registration failed' }));
@@ -736,7 +752,7 @@ export const mapTicket = (ticket: BackendTicket): Ticket => ({
   title: ticket.title,
   description: ticket.description,
   category: ticket.category,
-  status: statusToFrontend(ticket.status),
+  status: statusToFrontend(ticket.status, ticket.awaiting_user_response === true),
   awaitingCustomerResponse: ticket.awaiting_user_response === true,
   priority: priorityToFrontend(ticket.priority),
   userId: ticket.created_by || '',
@@ -796,6 +812,8 @@ export const mapAgentAvailability = (availability: BackendAgentAvailability): Ag
   name: availability.name,
   onLeaveToday: availability.on_leave_today,
   openTicketCount: availability.open_ticket_count,
+  department: availability.department,
+  specialization: availability.specialization,
 });
 
 export const mapCurrentlyOnLeave = (record: BackendCurrentlyOnLeave): CurrentlyOnLeave => ({
@@ -847,6 +865,22 @@ export const getTicketAuditLogs = async (ticketId: string): Promise<AuditLog[]> 
     throw new Error(`Unable to fetch audit logs: ${response.status}`);
   }
   return await response.json() as AuditLog[];
+};
+
+export const addCommentApi = async (
+  ticketId: string,
+  content: string,
+  isInternal: boolean,
+): Promise<BackendTicketComment> => {
+  const response = await apiFetch(`${API_BASE_URL}/tickets/${ticketId}/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content, is_internal: isInternal }),
+  });
+  if (!response.ok) {
+    throw new Error(`Unable to add comment: ${response.status}`);
+  }
+  return await response.json() as BackendTicketComment;
 };
 
 export const createTicket = async (ticket: Partial<Ticket>, createdBy?: string, reason?: string): Promise<Ticket> => {
@@ -1462,4 +1496,33 @@ export const markAllNotificationsRead = async (): Promise<void> => {
     const errorMsg = await extractErrorFromResponse(response);
     throw new Error(errorMsg);
   }
+};
+
+export interface PrioritySLAConfig {
+  sla_target_hours: number;
+  first_response_minutes: number;
+}
+
+export interface SLAConfig {
+  critical: PrioritySLAConfig;
+  high: PrioritySLAConfig;
+  medium: PrioritySLAConfig;
+  low: PrioritySLAConfig;
+  near_breach_percent: number;
+}
+
+export const getSLAConfig = async (): Promise<SLAConfig> => {
+  const response = await apiFetch(`${API_BASE_URL}/sla-config`);
+  if (!response.ok) throw new Error('Failed to load SLA configuration');
+  return response.json();
+};
+
+export const updateSLAConfig = async (config: Partial<SLAConfig>): Promise<SLAConfig> => {
+  const response = await apiFetch(`${API_BASE_URL}/sla-config`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+  if (!response.ok) throw new Error('Failed to update SLA configuration');
+  return response.json();
 };

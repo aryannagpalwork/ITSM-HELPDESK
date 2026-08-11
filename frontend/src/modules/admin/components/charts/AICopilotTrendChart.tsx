@@ -1,8 +1,8 @@
 import React, { useMemo } from 'react';
 import {
   ResponsiveContainer,
-  LineChart,
-  Line,
+  AreaChart,
+  Area,
   XAxis,
   YAxis,
   Tooltip,
@@ -52,7 +52,21 @@ const AICopilotTrendChart: React.FC<Props> = ({ data }) => {
 
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <LineChart data={merged} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+      <AreaChart data={merged} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+        <defs>
+          <linearGradient id="aiChats" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor={chart.palette[0] || '#6366f1'} stopOpacity={0.25} />
+            <stop offset="95%" stopColor={chart.palette[0] || '#6366f1'} stopOpacity={0} />
+          </linearGradient>
+          <linearGradient id="aiResolved" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor={chart.palette[1] || '#10b981'} stopOpacity={0.25} />
+            <stop offset="95%" stopColor={chart.palette[1] || '#10b981'} stopOpacity={0} />
+          </linearGradient>
+          <linearGradient id="aiEscalated" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor={chart.palette[3] || '#f59e0b'} stopOpacity={0.25} />
+            <stop offset="95%" stopColor={chart.palette[3] || '#f59e0b'} stopOpacity={0} />
+          </linearGradient>
+        </defs>
         <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
         <XAxis dataKey="label" stroke={chart.stroke} fontSize={10} tickLine={false} />
         <YAxis stroke={chart.stroke} fontSize={10} tickLine={false} allowDecimals={false} />
@@ -62,10 +76,10 @@ const AICopilotTrendChart: React.FC<Props> = ({ data }) => {
           itemStyle={{ color: chart.tooltipText, fontSize: '11px' }}
         />
         <Legend wrapperStyle={{ fontSize: '10px' }} />
-        <Line type="monotone" dataKey="chats" stroke={chart.palette[0] || '#6366f1'} strokeWidth={2} dot={false} name="Chats" />
-        <Line type="monotone" dataKey="resolved" stroke={chart.palette[1] || '#10b981'} strokeWidth={2} dot={false} name="Resolved" />
-        <Line type="monotone" dataKey="escalated" stroke={chart.palette[3] || '#f59e0b'} strokeWidth={2} dot={false} name="Escalated" />
-      </LineChart>
+        <Area type="monotone" dataKey="chats" stroke={chart.palette[0] || '#6366f1'} strokeWidth={2} fill="url(#aiChats)" dot={false} name="Chats" />
+        <Area type="monotone" dataKey="resolved" stroke={chart.palette[1] || '#10b981'} strokeWidth={2} fill="url(#aiResolved)" dot={false} name="Resolved" />
+        <Area type="monotone" dataKey="escalated" stroke={chart.palette[3] || '#f59e0b'} strokeWidth={2} fill="url(#aiEscalated)" dot={false} name="Escalated" />
+      </AreaChart>
     </ResponsiveContainer>
   );
 };

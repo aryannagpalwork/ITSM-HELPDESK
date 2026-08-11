@@ -2,10 +2,10 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Activity, AlertCircle, ChevronLeft, ChevronRight, CircleUserRound,
-  Clock3, Mail, Search, SlidersHorizontal, Users, X,
+  Clock3, Edit3, Mail, Search, SlidersHorizontal, Users, X,
 } from 'lucide-react';
 import {
-  AdminAgent, AdminAgentTicket, getAdminAgent, listAdminAgentTickets, listAdminAgents,
+  AdminAgent, AdminAgentTicket, getAdminAgent, listAdminAgentTickets, listAdminAgents, updateUser,
 } from '../../shared/api';
 import { useApp } from '../../shared/AppContext';
 
@@ -58,6 +58,13 @@ export const AgentManagement: React.FC = () => {
   const [ticketSearch, setTicketSearch] = useState('');
   const [ticketSort, setTicketSort] = useState('created_at');
   const [ticketSortOrder, setTicketSortOrder] = useState<'asc' | 'desc'>('desc');
+
+  const [editModal, setEditModal] = useState<AdminAgent | null>(null);
+  const [editDepartment, setEditDepartment] = useState('');
+  const [editSpecializations, setEditSpecializations] = useState<string[]>([]);
+  const [editSpecInput, setEditSpecInput] = useState('');
+  const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState('');
 
   const loadAgents = useCallback(async () => {
     setLoading(true);
@@ -136,6 +143,43 @@ export const AgentManagement: React.FC = () => {
     setDetailError(null);
   };
 
+  const openEditModal = (agent: AdminAgent, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setEditModal(agent);
+    setEditDepartment(agent.department || '');
+    const spec = agent.specialization;
+    if (Array.isArray(spec)) setEditSpecializations(spec);
+    else if (typeof spec === 'string' && spec) setEditSpecializations([spec]);
+    else setEditSpecializations([]);
+    setEditSpecInput('');
+    setEditError('');
+  };
+
+  const handleEditSubmit = async () => {
+    if (!editModal) return;
+    setEditLoading(true);
+    setEditError('');
+    try {
+      await updateUser(
+        editModal.id,
+        undefined,
+        editDepartment.trim() || undefined,
+        undefined,
+        editSpecializations
+      );
+      setEditModal(null);
+      await loadAgents();
+      if (selectedAgent?.id === editModal.id) {
+        const refreshed = await getAdminAgent(editModal.id);
+        setSelectedAgent(refreshed);
+      }
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Failed to update agent.');
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
   if (!isAdmin) return null;
 
   return (
@@ -201,8 +245,9 @@ export const AgentManagement: React.FC = () => {
       </div>
 
       {selectedAgent && <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4" onMouseDown={event => { if (event.target === event.currentTarget) setSelectedAgent(null); }}>
+
         <div className="bg-card-solid border border-token rounded-2xl w-full max-w-6xl max-h-[92vh] overflow-y-auto shadow-2xl" style={{ backgroundColor: 'var(--card-bg-solid)', color: 'var(--text-primary)', opacity: 1 }}>
-          <div className="p-5 border-b border-token flex items-start justify-between"><div><span className="text-[10px] text-tertiary font-mono uppercase tracking-widest">Agent Profile</span><h2 className="text-lg font-bold text-primary mt-1">{selectedAgent.full_name}</h2><p className="text-xs text-secondary mt-1 flex items-center gap-1"><Mail className="w-3 h-3" />{selectedAgent.email}</p></div><button onClick={() => setSelectedAgent(null)} className="p-2 rounded-lg hover-surface"><X className="w-4 h-4 text-secondary" /></button></div>
+          <div className="p-5 border-b border-token flex items-start justify-between"><div><span className="text-[10px] text-tertiary font-mono uppercase tracking-widest">Agent Profile</span><h2 className="text-lg font-bold text-primary mt-1">{selectedAgent.full_name}</h2><p className="text-xs text-secondary mt-1 flex items-center gap-1"><Mail className="w-3 h-3" />{selectedAgent.email}</p></div><div className="flex items-center gap-2"><button onClick={() => openEditModal(selectedAgent)} className="px-3 py-1.5 bg-blue-500/10 border border-blue-500/30 hover:bg-blue-500/20 text-blue-400 rounded-lg text-[10px] font-semibold flex items-center gap-1 transition-all" title="Edit department & specialization"><Edit3 className="w-3 h-3" /><span>Edit</span></button><button onClick={() => setSelectedAgent(null)} className="p-2 rounded-lg hover-surface"><X className="w-4 h-4 text-secondary" /></button></div></div>
           {detailError && <div className="m-5 p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300">{detailError}</div>}
           <div className="p-5 grid grid-cols-2 md:grid-cols-4 gap-3"><StatCard label="Active Tickets" value={selectedAgent.active_ticket_count} tone="text-indigo-400" /><StatCard label="Maximum Capacity" value={selectedAgent.max_capacity} /><StatCard label="Total Assigned" value={ticketSummary.total_assigned ?? selectedAgent.total_assigned} /><StatCard label="Total Resolved" value={ticketSummary.resolved ?? selectedAgent.total_resolved} tone="text-sky-400" /></div>
           <div className="mx-5 mb-5 p-4 rounded-xl bg-input border border-token grid grid-cols-1 md:grid-cols-3 gap-3 text-xs"><div><span className="block text-[9px] uppercase font-mono text-tertiary">Department</span><span className="text-secondary">{selectedAgent.department || '—'}</span></div><div><span className="block text-[9px] uppercase font-mono text-tertiary">Availability</span><span className="text-secondary">{selectedAgent.availability || 'Available'}</span></div><div><span className="block text-[9px] uppercase font-mono text-tertiary">Last Assigned</span><span className="text-secondary">{formatDate(selectedAgent.last_assigned_at)}</span></div></div>
@@ -212,6 +257,78 @@ export const AgentManagement: React.FC = () => {
           </div>
         </div>
       </div>}
+
+      {editModal && (
+        <div className="fixed inset-0 z-[60] bg-black/75 flex items-center justify-center p-4" onMouseDown={event => { if (event.target === event.currentTarget) setEditModal(null); }}>
+          <div className="bg-card-solid border border-token rounded-2xl w-full max-w-md shadow-2xl">
+            <div className="p-5 border-b border-token flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Edit3 className="w-4 h-4 text-blue-400" />
+                <div>
+                  <h3 className="text-sm font-bold text-primary">Edit Agent Details</h3>
+                  <p className="text-[10px] text-tertiary mt-0.5">{editModal.full_name}</p>
+                </div>
+              </div>
+              <button onClick={() => setEditModal(null)} className="p-1.5 rounded-lg hover-surface"><X className="w-4 h-4 text-secondary" /></button>
+            </div>
+            {editError && <div className="mx-5 mt-4 p-2.5 bg-rose-500/10 border border-rose-500/20 rounded-lg text-[10px] text-rose-400">{editError}</div>}
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-[10px] font-mono uppercase text-tertiary mb-1.5">Department</label>
+                <input
+                  type="text"
+                  value={editDepartment}
+                  onChange={e => setEditDepartment(e.target.value)}
+                  className="w-full input-token rounded-lg px-3 py-2 text-xs outline-none"
+                  placeholder="e.g. Information Technology"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-mono uppercase text-tertiary mb-1.5">Specialization</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={editSpecInput}
+                    onChange={e => setEditSpecInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); const v = editSpecInput.trim(); if (v && !editSpecializations.includes(v)) setEditSpecializations([...editSpecializations, v]); setEditSpecInput(''); } }}
+                    className="w-full input-token rounded-lg px-3 py-2 text-xs outline-none"
+                    placeholder="e.g. Network, Hardware"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => { const v = editSpecInput.trim(); if (v && !editSpecializations.includes(v)) setEditSpecializations([...editSpecializations, v]); setEditSpecInput(''); }}
+                    className="px-3 py-2 bg-accent/10 border border-accent/30 text-accent rounded-lg text-[10px] font-semibold hover:bg-accent/20 transition-all"
+                  >
+                    Add
+                  </button>
+                </div>
+                {editSpecializations.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {editSpecializations.map(spec => (
+                      <span key={spec} className="inline-flex items-center gap-1 text-[9px] px-2 py-1 rounded-full bg-accent-soft text-accent border border-token font-medium">
+                        {spec}
+                        <button type="button" onClick={() => setEditSpecializations(editSpecializations.filter(s => s !== spec))} className="hover:opacity-70">
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="p-5 border-t border-token flex justify-end gap-2">
+              <button onClick={() => setEditModal(null)} className="px-4 py-2 bg-card hover-elev text-secondary rounded-lg text-[10px] font-semibold transition-all">Cancel</button>
+              <button
+                onClick={handleEditSubmit}
+                disabled={editLoading}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg text-[10px] font-semibold transition-all"
+              >
+                {editLoading ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -10,7 +10,7 @@ export interface User {
   email: string;
   role: UserRole;
   departmentId?: string;
-  specialization?: string;
+  specialization?: string | string[] | null;
   createdAt?: string;
 }
 
@@ -110,8 +110,8 @@ export interface SystemAlert {
 export interface UserNotification {
   id: string;
   userId: string;
-  type: 'alert' | 'info';
-  title: string;
+  type: 'alert' | 'info' | 'ticket.assigned' | 'ticket.unassigned' | 'ticket.response' | 'feedback_request';
+  title?: string;
   message: string;
   ticketId?: string | null;
   alertId?: string | null;
@@ -255,6 +255,7 @@ export interface EmployeeKPIs {
   mttrHours: number;
   fcrRate: number;
   avgFirstResponseHours: number;
+  firstResponseSlaCompliance: number;
   reopenedTickets: number;
   aiCopilot: AICopilotEmployeeKPIs;
 }
@@ -331,6 +332,7 @@ export interface AgentKPIs {
   aiMttrHours: number;
   agentFcrRate: number;
   avgFirstResponseHours: number;
+  firstResponseSlaCompliance: number;
   resolutionRate: number;
   slaCompliance: number;
   reopenRate: number;
@@ -357,6 +359,7 @@ export interface AdminKPIs {
   activeSlaTickets: number;
   nearBreachTickets: number;
   criticalSlaBreaches: number;
+  firstResponseSlaCompliance: number;
   ticketBacklog: number;
   aiResolutionRate: number;
   aiQueries: number;
@@ -384,6 +387,8 @@ export interface AgentAvailability {
   name: string;
   onLeaveToday: boolean;
   openTicketCount: number;
+  department?: string | null;
+  specialization?: string | string[] | null;
 }
 
 export interface CurrentlyOnLeave {

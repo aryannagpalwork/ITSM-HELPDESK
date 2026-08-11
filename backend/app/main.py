@@ -16,6 +16,7 @@ from app.database.mongodb import (
 )
 from app.database.seed import seed_demo_data
 from app.services.anomaly_scheduler import start_scheduler, stop_scheduler
+from app.services.sla import load_sla_config_from_db
 
 settings = get_settings()
 configure_logging(settings)
@@ -33,6 +34,7 @@ async def lifespan(app: FastAPI):
         await seed_demo_data(db)
         await normalize_ticket_statuses(db)
         await reconcile_agent_workloads(db)
+        await load_sla_config_from_db(db)
         logger.info("Demo data seeded successfully")
     except Exception as e:
         logger.error("Error seeding demo data: %s", e, exc_info=True)

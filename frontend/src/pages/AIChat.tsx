@@ -1,10 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useApp } from '../shared/AppContext';
+import { useChat } from '../shared/ChatContext';
 import { useTheme } from '../shared/ThemeContext';
-import { ChatMessage, TicketPriority } from '../shared/types';
-import { sendChat, escalateToTicket, submitAIChatFeedback } from '../shared/api';
-import type { SatisfactionCard } from '../shared/types';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -27,320 +24,130 @@ import {
 export const AIChat: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { createTicket, loadTickets } = useApp();
   const { tokens } = useTheme();
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
-  const [typingText, setTypingText] = useState('');
-  const [suggestedTicket, setSuggestedTicket] = useState<{
-    title: string;
-    description: string;
-    priority: TicketPriority;
-    show: boolean;
-    resolvedByAI?: boolean;
-    ticketId?: string;
-  } | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [collapsedMessages, setCollapsedMessages] = useState<Record<string, boolean>>({});
-  const [activeSatisfactionCard, setActiveSatisfactionCard] = useState<SatisfactionCard | null>(null);
-  const [conversationStatus, setConversationStatus] = useState<'ACTIVE' | 'INVESTIGATING' | 'WAITING_FOR_USER' | 'LIKELY_RESOLVED' | 'ESCALATED' | 'RESOLVED'>('ACTIVE');
-  const [guidedActions, setGuidedActions] = useState<string[]>([]);
-  const [guidedState, setGuidedState] = useState<string | null>(null);
+  const {
+    messages,
+    input,
+    setInput,
+    isTyping,
+    typingText,
+    suggestedTicket,
+    collapsedMessages,
+    toggleCollapse,
+    activeSatisfactionCard,
+    conversationStatus,
+    guidedActions,
+    guidedState,
+    isEscalating,
+    isFeedbackLoading,
+    contentRef,
+    handleSendPrompt,
+    handleGuidedYes,
+    handleGuidedNo,
+    handleConvertTicket,
+    handleSatisfactionResolved,
+    handleSatisfactionCreateTicket,
+    resetThread,
+  } = useChat();
 
-  const contentRef = useRef<HTMLDivElement>(null);
+    const [isProcessing, setIsProcessing] = useState(false);
+    const isProcessingRef = useRef(false);
+    const conversationEndedRef = useRef(false);
+    const isAtBottomRef = useRef(true);
 
-  useEffect(() => {
-    if (contentRef.current) {
-      contentRef.current.scrollTop = contentRef.current.scrollHeight;
-    }
-  }, [messages, isTyping, typingText]);
-
-  useEffect(() => {
-    const welcomeMsg: ChatMessage = {
-      id: 'welcome',
-      sender: 'assistant',
-      text: "Hello! I am your Enterprise ITSM Helpdesk Copilot. I have real-time semantic access to the entire company knowledge base and active systems catalogs.\n\nHow can I help you today? Feel free to describe any issues (e.g., password lockouts, VPN connection errors, hardware procurement, or email sync setups).",
-      timestamp: new Date().toISOString()
+    const beginProcessing = () => {
+      if (isProcessingRef.current) return false;
+      isProcessingRef.current = true;
+      setIsProcessing(true);
+      return true;
     };
-    setMessages([welcomeMsg]);
 
+    const finishProcessing = () => {
+      isProcessingRef.current = false;
+      setIsProcessing(false);
+    };
+
+    const handleSendPromptWrapper = async (textToSend: string) => {
+      if (!textToSend.trim() || !beginProcessing()) return;
+
+      const isFreshQuery = conversationEndedRef.current;
+      conversationEndedRef.current = false;
+      if (isFreshQuery) {
+        resetThread();
+      }
+
+      try {
+        await handleSendPrompt(textToSend);
+      } finally {
+        finishProcessing();
+      }
+    };
+
+    const handleGuidedYesWrapper = async () => {
+      if (!beginProcessing()) return;
+      try {
+        await handleGuidedYes();
+        conversationEndedRef.current = true;
+      } finally {
+        finishProcessing();
+      }
+    };
+
+    const handleGuidedNoWrapper = () => {
+      if (isProcessingRef.current) return;
+      handleGuidedNo();
+    };
+
+    const handleConvertTicketWrapper = async () => {
+      if (!beginProcessing()) return;
+      try {
+        await handleConvertTicket();
+        conversationEndedRef.current = true;
+      } finally {
+        finishProcessing();
+      }
+    };
+
+    const handleSatisfactionResolvedWrapper = async () => {
+      if (!beginProcessing()) return;
+      try {
+        await handleSatisfactionResolved();
+        conversationEndedRef.current = true;
+      } finally {
+        finishProcessing();
+      }
+    };
+
+    const handleSatisfactionCreateTicketWrapper = async () => {
+      if (!beginProcessing()) return;
+      try {
+        await handleSatisfactionCreateTicket();
+        conversationEndedRef.current = true;
+      } finally {
+        finishProcessing();
+      }
+    };
+
+    useEffect(() => {
+      if (contentRef.current && isAtBottomRef.current) {
+        contentRef.current.scrollTop = contentRef.current.scrollHeight;
+      }
+    }, [messages, isTyping, typingText]);
+
+    const handleConversationScroll = () => {
+    const content = contentRef.current;
+    if (!content) return;
+
+    isAtBottomRef.current = content.scrollHeight - content.scrollTop - content.clientHeight < 24;
+  };
+
+  useEffect(() => {
     const state = location.state as { initialPrompt?: string };
     if (state?.initialPrompt) {
-      handleSendPrompt(state.initialPrompt);
+      handleSendPromptWrapper(state.initialPrompt);
     }
   }, [location]);
-
-  const simulateTyping = async (text: string, msgId: string) => {
-    setTypingText('');
-    let index = 0;
-    const speed = 15;
-
-    const typeChar = () => {
-      if (index < text.length) {
-        setTypingText(prev => prev + text.charAt(index));
-        index++;
-        setTimeout(typeChar, speed);
-      } else {
-        setTypingText('');
-        const botMsg: ChatMessage = {
-          id: msgId,
-          sender: 'assistant',
-          text: text,
-          timestamp: new Date().toISOString()
-        };
-        setMessages(prev => [...prev, botMsg]);
-        setIsTyping(false);
-      }
-    };
-
-    typeChar();
-  };
-
-  const handleSendPrompt = async (textToSend: string) => {
-    if (!textToSend.trim()) return;
-
-    const userMsg: ChatMessage = {
-      id: `usr_${Date.now()}`,
-      sender: 'user',
-      text: textToSend,
-      timestamp: new Date().toISOString()
-    };
-
-    setMessages(prev => [...prev, userMsg]);
-    setInput('');
-    setIsTyping(true);
-
-    try {
-      const chatHistory = messages.map(msg => ({
-        role: msg.sender === 'user' ? 'user' : 'assistant',
-        content: msg.text
-      }));
-
-      const response = await sendChat({
-        query: textToSend,
-        top_k: 5,
-        similarity_threshold: 0.0,
-        chat_history: chatHistory,
-        session_id: sessionId
-      });
-
-      setSessionId(response.session_id);
-      if (response.guided_state === 'RESOLVED') {
-        await loadTickets();
-      }
-
-      // Satisfaction is now driven by the backend conversation tracker, NOT
-      // by searching the answer for plain-text prompts.
-      setGuidedActions(response.guided_actions || []);
-      setGuidedState(response.guided_state || null);
-
-      if (!response.guided_state && response.satisfaction_card?.show && !activeSatisfactionCard) {
-        setActiveSatisfactionCard(response.satisfaction_card);
-        if (response.satisfaction_card.reason === 'POSITIVE_TREND') {
-          setConversationStatus('LIKELY_RESOLVED');
-        } else if (response.satisfaction_card.reason === 'NEGATIVE_STALL') {
-          setConversationStatus('WAITING_FOR_USER');
-        }
-      }
-
-      simulateTyping(response.answer, `bot_${Date.now()}`);
-
-      if (response.suggested_ticket) {
-        setSuggestedTicket({
-          title: response.suggested_ticket.title || 'Support Request',
-          description: response.suggested_ticket.description || textToSend,
-          priority: (response.suggested_ticket.priority?.toLowerCase() || 'medium') as TicketPriority,
-          show: true,
-          ticketId: response.ticket_id || undefined,
-        });
-      } else if (response.ticket_id) {
-        setSuggestedTicket(previous => previous ? { ...previous, ticketId: response.ticket_id } : previous);
-      } else if (response.guided_state && response.guided_state !== 'RESOLVED' && response.guided_state !== 'NO_SOLUTION') {
-        // Keep a non-submitted draft visible throughout the Copilot session.
-        // This is only sidebar state; the existing File Support Incident action
-        // remains the sole path that creates a human ticket.
-        setSuggestedTicket(previous => previous || {
-          title: textToSend.length > 80 ? `${textToSend.slice(0, 77)}...` : textToSend,
-          description: textToSend,
-          priority: 'medium',
-          show: true,
-        });
-      }
-    } catch (error) {
-      console.error('Chat failed:', error);
-      const errorMsg: ChatMessage = {
-        id: `err_${sessionId ? sessionId.slice(0, 8) : 'unknown'}_${Date.now()}`,
-        sender: 'system',
-        text: 'Sorry, there was an error processing your request. Please try again.',
-        timestamp: new Date().toISOString()
-      };
-      setMessages(prev => [...prev, errorMsg]);
-      setIsTyping(false);
-    }
-  };
-
-  const handleGuidedYes = async () => {
-    if (!sessionId || isFeedbackLoading) return;
-    setIsFeedbackLoading(true);
-    try {
-      const feedbackResult = await submitAIChatFeedback(sessionId, 'positive');
-      const refreshedTickets = await loadTickets();
-      const refreshedAITicket = refreshedTickets.find(ticket => ticket.aiResolved === true);
-      setConversationStatus('RESOLVED');
-      setGuidedActions([]);
-      setGuidedState('RESOLVED');
-      setSuggestedTicket(prev => ({
-        ...(prev || {
-          title: 'AI Resolved Support Request',
-          description: 'Issue resolved by AI Copilot.',
-          priority: 'medium' as TicketPriority,
-        }),
-        show: true,
-        resolvedByAI: true,
-        ticketId: feedbackResult.ticket_id || prev?.ticketId || refreshedAITicket?.id,
-      }));
-      setMessages(prev => [...prev, {
-        id: `resolved_${Date.now()}`,
-        sender: 'assistant',
-        text: 'Thanks for confirming. Your issue has been marked as Resolved by AI.',
-        timestamp: new Date().toISOString(),
-      }]);
-    } catch (error) {
-      console.error('[Guided Resolution] Failed:', error);
-    } finally {
-      setIsFeedbackLoading(false);
-    }
-  };
-
-  const handleGuidedNo = () => {
-    setActiveSatisfactionCard(null);
-    handleSendPrompt('No');
-  };
-
-  const [isEscalating, setIsEscalating] = useState(false);
-  const [isFeedbackLoading, setIsFeedbackLoading] = useState(false);
-
-  const handleConvertTicket = async () => {
-    if (!suggestedTicket || !sessionId || isEscalating) return;
-
-    setIsEscalating(true);
-    setIsTyping(true);
-    const uniqueId = `sys_${sessionId ? sessionId.slice(0, 8) : 'unknown'}_${Date.now()}`;
-
-    try {
-      console.log('[Ticket Escalation] Starting escalation for session:', sessionId);
-      const newTicket = await escalateToTicket(sessionId);
-      console.log('[Ticket Escalation] Success, ticket:', newTicket.id, newTicket.ticketNumber);
-
-      // Refresh tickets in AppContext so My Tickets and Dashboard update immediately
-      await loadTickets();
-      console.log('[Ticket Escalation] Tickets refreshed in context');
-
-      setSuggestedTicket(null);
-
-      const confirmationMsg: ChatMessage = {
-        id: uniqueId,
-        sender: 'system',
-        text: `✅ **IT Incident Ticket Created Successfully!**\n\n**Ticket Reference:** ${newTicket.ticketNumber || newTicket.id}\n**Priority:** ${newTicket.priority.toUpperCase()}\n**Status:** OPEN\n\nYou can view and track this ticket in the Ticket Queue.`,
-        timestamp: new Date().toISOString()
-      };
-
-      setMessages(prev => [...prev, confirmationMsg]);
-      setIsTyping(false);
-      setIsEscalating(false);
-    } catch (error) {
-      console.error('[Ticket Escalation] Failed:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to create support ticket. Please try again.';
-      const errorMsg: ChatMessage = {
-        id: `err_${sessionId ? sessionId.slice(0, 8) : 'unknown'}_${Date.now()}`,
-        sender: 'system',
-        text: `❌ **Ticket Creation Failed**\n\n${errorMessage}\n\nPlease try again or contact IT support directly.`,
-        timestamp: new Date().toISOString()
-      };
-      setMessages(prev => [...prev, errorMsg]);
-      setIsTyping(false);
-      setIsEscalating(false);
-    }
-  };
-
-  const handleSatisfactionResolved = async () => {
-    if (!activeSatisfactionCard || isFeedbackLoading) return;
-    const sid = activeSatisfactionCard.session_id || sessionId;
-    setIsFeedbackLoading(true);
-    try {
-      if (sid) {
-        const feedbackResult = await submitAIChatFeedback(sid, 'positive');
-        const refreshedTickets = await loadTickets();
-        const refreshedAITicket = refreshedTickets.find(ticket => ticket.aiResolved === true);
-        setSuggestedTicket(prev => prev ? { ...prev, show: true, resolvedByAI: true, ticketId: feedbackResult.ticket_id || prev.ticketId || refreshedAITicket?.id } : prev);
-      }
-      setConversationStatus('RESOLVED');
-      setActiveSatisfactionCard(null);
-      const resolvedMsg = 'Thank you for the update. I’m glad I could help — feel free to reach out any time.';
-      setMessages(prev => [...prev, { id: `assist_${Date.now()}`, sender: 'assistant', text: resolvedMsg, timestamp: new Date().toISOString() }]);
-    } catch (error) {
-      console.error('[Satisfaction Feedback] Failed:', error);
-    } finally {
-      setIsFeedbackLoading(false);
-    }
-  };
-
-  const handleSatisfactionCreateTicket = async () => {
-    if (isFeedbackLoading) return;
-    const sid = activeSatisfactionCard?.session_id || sessionId;
-    setIsFeedbackLoading(true);
-    setIsEscalating(true);
-    setIsTyping(true);
-    const uniqueId = `sys_${sid ? sid.slice(0, 8) : 'unknown'}_${Date.now()}`;
-    try {
-      if (sid) {
-        try { await submitAIChatFeedback(sid, 'negative'); } catch (_f) { /* ignore secondary feedback errors */ }
-      }
-      if (sid && !suggestedTicket) {
-        // No pre-generated suggested_ticket? Call escalateToTicket directly anyway.
-        // The endpoint will generate one from chat history.
-      }
-      if (suggestedTicket && sid) {
-        await handleConvertTicket();
-      } else if (sid) {
-        const newTicket = await escalateToTicket(sid, 'AI could not resolve; user requested ticket from satisfaction card.');
-        await loadTickets();
-        const confirmationMsg: ChatMessage = {
-          id: uniqueId,
-          sender: 'system',
-          text: `✅ **IT Incident Ticket Created Successfully!**\n\n**Ticket Reference:** ${newTicket.ticketNumber || newTicket.id}\n**Priority:** ${newTicket.priority.toUpperCase()}\n**Status:** OPEN\n\nYou can view and track this ticket in the Ticket Queue.`,
-          timestamp: new Date().toISOString()
-        };
-        setMessages(prev => [...prev, confirmationMsg]);
-      }
-      setConversationStatus('ESCALATED');
-      setActiveSatisfactionCard(null);
-      setSuggestedTicket(null);
-    } catch (error) {
-      console.error('[Satisfaction Ticket] Failed:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to create support ticket. Please try again.';
-      const errorMsg: ChatMessage = {
-        id: `err_${sid ? sid.slice(0, 8) : 'unknown'}_${Date.now()}`,
-        sender: 'system',
-        text: `❌ **Ticket Creation Failed**\n\n${errorMessage}\n\nPlease try again or contact IT support directly.`,
-        timestamp: new Date().toISOString()
-      };
-      setMessages(prev => [...prev, errorMsg]);
-    } finally {
-      setIsFeedbackLoading(false);
-      setIsEscalating(false);
-      setIsTyping(false);
-    }
-  };
-
-  const toggleCollapse = (msgId: string) => {
-    setCollapsedMessages(prev => ({
-      ...prev,
-      [msgId]: !prev[msgId]
-    }));
-  };
 
   const shouldCollapse = (text: string) => {
     return text.length > 1200;
@@ -391,7 +198,7 @@ export const AIChat: React.FC = () => {
                 if (!isFeedbackLoading) e.currentTarget.style.opacity = '0.9';
               }}
               onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
-              onClick={handleSatisfactionResolved}
+              onClick={handleSatisfactionResolvedWrapper}
             >
               Yes, Issue Resolved
             </button>
@@ -411,7 +218,7 @@ export const AIChat: React.FC = () => {
               onMouseLeave={(e) => {
                 e.currentTarget.style.backgroundColor = tokens.statusWarningBg;
               }}
-              onClick={handleSatisfactionCreateTicket}
+              onClick={handleSatisfactionCreateTicketWrapper}
             >
               No, Create Support Ticket
             </button>
@@ -422,13 +229,13 @@ export const AIChat: React.FC = () => {
   };
 
   const renderGuidedActions = () => {
-    if (guidedActions.length < 2 || guidedState === 'RESOLVED' || guidedState === 'NO_SOLUTION') return null;
+    if (isProcessing || suggestedTicket?.ticketId || guidedActions.length < 2 || guidedState === 'RESOLVED' || guidedState === 'NO_SOLUTION') return null;
     return (
       <div className="flex justify-center mt-2">
         <div className="max-w-xl w-full flex gap-2">
           <button
-            disabled={isFeedbackLoading || isTyping}
-            onClick={handleGuidedYes}
+            disabled={isProcessing || isFeedbackLoading || isTyping}
+            onClick={handleGuidedYesWrapper}
             className="flex-1 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 border transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ backgroundColor: tokens.statusSuccessBg, color: tokens.statusSuccess, borderColor: `${tokens.statusSuccess}55` }}
           >
@@ -436,8 +243,8 @@ export const AIChat: React.FC = () => {
             Yes, resolved
           </button>
           <button
-            disabled={isFeedbackLoading || isTyping}
-            onClick={handleGuidedNo}
+            disabled={isProcessing || isFeedbackLoading || isTyping}
+            onClick={handleGuidedNoWrapper}
             className="flex-1 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 border transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ backgroundColor: tokens.statusWarningBg, color: 'var(--text-primary)', borderColor: `${tokens.statusWarning}55` }}
           >
@@ -448,6 +255,7 @@ export const AIChat: React.FC = () => {
       </div>
     );
   };
+
 
   return (
     <div id="ai-chat-container" className="flex-1 flex h-full font-sans" style={{ backgroundColor: 'var(--app-bg)' }}>
@@ -473,15 +281,11 @@ export const AIChat: React.FC = () => {
           </div>
           <button 
             onClick={() => {
-              setMessages([messages[0]]);
-              setSuggestedTicket(null);
-              setSessionId(null);
-              setCollapsedMessages({});
-              setActiveSatisfactionCard(null);
-              setConversationStatus('ACTIVE');
-              setGuidedActions([]);
-              setGuidedState(null);
+              if (isProcessingRef.current) return;
+              resetThread();
+              conversationEndedRef.current = false;
             }}
+            disabled={isProcessing}
             className="p-1.5 rounded-lg transition-all text-[10px] flex items-center gap-1.5 cursor-pointer border"
             style={{ backgroundColor: 'var(--card-bg-solid)', color: 'var(--text-secondary)', borderColor: 'var(--border)' }}
             onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--hover)'; e.currentTarget.style.color = 'var(--text-primary)'; }}
@@ -496,6 +300,7 @@ export const AIChat: React.FC = () => {
         <div 
           ref={contentRef}
           className="flex-1 overflow-y-auto p-6 space-y-8"
+          onScroll={handleConversationScroll}
         >
           {messages.map((msg, idx) => {
             const isBot = msg.sender === 'assistant';
@@ -758,10 +563,11 @@ export const AIChat: React.FC = () => {
                 placeholder="Ask IT support or troubleshoot connection problems..."
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
+                disabled={isProcessing}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
+                  if (!isProcessing && e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
-                    handleSendPrompt(input);
+                    handleSendPromptWrapper(input);
                   }
                 }}
                 className="flex-1 bg-transparent border-none text-sm outline-none resize-none max-h-48"
@@ -769,7 +575,8 @@ export const AIChat: React.FC = () => {
                 rows={1}
               />
               <button 
-                onClick={() => handleSendPrompt(input)}
+                onClick={() => handleSendPromptWrapper(input)}
+                disabled={isProcessing}
                 className="p-2 rounded-xl transition-all shrink-0 cursor-pointer ml-2"
                 style={{ backgroundColor: tokens.accentPrimary, color: 'var(--accent-primary-contrast)' }}
                 onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.9'; }}
@@ -812,13 +619,17 @@ export const AIChat: React.FC = () => {
             >
               <div className="flex items-center space-x-2 mb-3" style={{ color: tokens.accentPrimary }}>
                 <PlusCircle className="w-4 h-4" />
-                <h4 className="text-xs font-semibold">Incident Proposal</h4>
+                <h4 className="text-xs font-semibold">
+                  {suggestedTicket.knowledgeBaseFallback ? 'Create IT Support Ticket' : 'Incident Proposal'}
+                </h4>
               </div>
               <p 
                 className="text-[10px] leading-relaxed mb-4"
                 style={{ color: 'var(--text-secondary)' }}
               >
-                The Copilot has analyzed your problem and prepared an automated Service Ticket template to bypass standard level-1 queues.
+                {suggestedTicket.knowledgeBaseFallback
+                  ? 'The Knowledge Base did not contain enough relevant information for this query. File a ticket so the IT team can help.'
+                  : 'The Copilot has analyzed your problem and prepared an automated Service Ticket template to bypass standard level-1 queues.'}
               </p>
 
               <div 
@@ -846,14 +657,14 @@ export const AIChat: React.FC = () => {
                     navigate(suggestedTicket.ticketId ? `${base}/${suggestedTicket.ticketId}` : `${base}?status=resolved_ai`);
                     return;
                   }
-                  handleConvertTicket();
+                  handleConvertTicketWrapper();
                 }}
                 className="w-full py-2 rounded-lg text-[10px] font-semibold flex items-center justify-center space-x-2 transition-all cursor-pointer shadow-md"
                 style={{ backgroundColor: suggestedTicket.resolvedByAI ? tokens.statusSuccess : tokens.accentPrimary, color: 'var(--accent-primary-contrast)', boxShadow: `0 4px 12px ${tokens.accentPrimary}1a` }}
                 onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.9'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
               >
-                <span>{suggestedTicket.resolvedByAI ? 'Resolved by AI' : 'File Support Incident'}</span>
+                <span>{suggestedTicket.resolvedByAI ? 'Resolved by AI' : suggestedTicket.knowledgeBaseFallback ? 'Create Ticket / File Incident' : 'File Support Incident'}</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -881,7 +692,7 @@ export const AIChat: React.FC = () => {
             <h5 className="text-[10px] font-semibold mb-2 font-mono uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>Helpful Quick Queries</h5>
             <div className="space-y-1.5 text-[9px] font-medium">
               <button 
-                onClick={() => handleSendPrompt("My laptop Okta MFA push is failing, how can I re-enroll my device?")}
+                onClick={() => handleSendPromptWrapper("My laptop Okta MFA push is failing, how can I re-enroll my device?")}
                 className="w-full text-left py-1.5 px-2 rounded border transition-all text-ellipsis overflow-hidden whitespace-nowrap cursor-pointer flex justify-between"
                 style={{ backgroundColor: 'var(--card-bg-solid)', borderColor: 'transparent', color: 'var(--text-secondary)' }}
                 onMouseEnter={(e) => { 
@@ -899,7 +710,7 @@ export const AIChat: React.FC = () => {
                 <ArrowUpRight className="w-2.5 h-2.5" style={{ color: 'var(--text-tertiary)' }} />
               </button>
               <button 
-                onClick={() => handleSendPrompt("Cannot connect to remote database from staging cluster, receiving RDS timeout")}
+                onClick={() => handleSendPromptWrapper("Cannot connect to remote database from staging cluster, receiving RDS timeout")}
                 className="w-full text-left py-1.5 px-2 rounded border transition-all text-ellipsis overflow-hidden whitespace-nowrap cursor-pointer flex justify-between"
                 style={{ backgroundColor: 'var(--card-bg-solid)', borderColor: 'transparent', color: 'var(--text-secondary)' }}
                 onMouseEnter={(e) => { 
@@ -917,7 +728,7 @@ export const AIChat: React.FC = () => {
                 <ArrowUpRight className="w-2.5 h-2.5" style={{ color: 'var(--text-tertiary)' }} />
               </button>
               <button 
-                onClick={() => handleSendPrompt("How do I connect our macOS devices to Company Wi-Fi network?")}
+                onClick={() => handleSendPromptWrapper("How do I connect our macOS devices to Company Wi-Fi network?")}
                 className="w-full text-left py-1.5 px-2 rounded border transition-all text-ellipsis overflow-hidden whitespace-nowrap cursor-pointer flex justify-between"
                 style={{ backgroundColor: 'var(--card-bg-solid)', borderColor: 'transparent', color: 'var(--text-secondary)' }}
                 onMouseEnter={(e) => { 

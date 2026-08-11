@@ -1,7 +1,8 @@
 from typing import Annotated, Optional
 from datetime import datetime
+from uuid import uuid4
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
 from fastapi import Depends
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
@@ -9,7 +10,9 @@ from pydantic import BaseModel, Field
 from app.api.deps import DatabaseSession
 from app.auth.dependencies import get_current_user, require_roles
 from app.schemas.ticket import (
+    CommentCreate,
     SortOrder,
+    TicketCommentRead,
     TicketCreate,
     TicketListResponse,
     TicketRead,
@@ -20,6 +23,7 @@ from app.schemas.ticket import (
 )
 from app.schemas.audit_log import AuditLogRead
 from app.services.tickets import (
+    add_comment,
     create_ticket,
     delete_ticket,
     get_ticket,
@@ -257,6 +261,23 @@ async def get_ticket_audit_logs_endpoint(
 ) -> list[AuditLogRead]:
     """Get audit logs for a single ticket."""
     return await get_ticket_audit_logs(db, ticket_id, current_user)
+
+
+@router.post("/{ticket_id}/comments", response_model=TicketCommentRead, status_code=status.HTTP_201_CREATED)
+async def add_comment_endpoint(
+    ticket_id: str,
+    payload: CommentCreate,
+    db: DatabaseSession,
+    current_user: dict = Depends(get_current_user),
+) -> TicketCommentRead:
+    """Add a comment or internal note to a ticket. Visible in lifecycle timeline."""
+    return await add_comment(
+        db,
+        ticket_id=ticket_id,
+        content=payload.content,
+        is_internal=payload.is_internal,
+        current_user_id=current_user["id"],
+    )
 
 
 @router.patch("/{ticket_id}", response_model=TicketRead)

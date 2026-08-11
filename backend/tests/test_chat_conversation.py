@@ -4,6 +4,8 @@ from app.api.chat import (
     _should_offer_ticket,
     _should_prompt_satisfaction,
 )
+from app.rag.prompt_builder import ChatMessage, MessageRole
+from app.services.llm.openai_service import _build_conversation_summary
 
 
 def test_positive_response_detection():
@@ -27,3 +29,13 @@ def test_ticket_offer_only_after_three_failures():
 def test_satisfaction_prompt_only_after_positive_resolution():
     assert _should_prompt_satisfaction("Resolved") is True
     assert _should_prompt_satisfaction("Still not working") is False
+
+
+def test_conversation_summary_includes_requester_and_copilot_context():
+    summary = _build_conversation_summary([
+        ChatMessage(role=MessageRole.USER, content="I cannot authenticate to the office Wi-Fi."),
+        ChatMessage(role=MessageRole.ASSISTANT, content="I asked the user to forget the network and re-enter credentials."),
+    ])
+
+    assert "User reported: I cannot authenticate to the office Wi-Fi." in summary
+    assert "AI Copilot response: I asked the user to forget the network" in summary

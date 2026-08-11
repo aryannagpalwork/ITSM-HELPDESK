@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronDown, LogOut, KeyRound, UserCircle2 } from 'lucide-react';
+import { LayoutDashboard, UserCircle2 } from 'lucide-react';
 import { useApp } from '../shared/AppContext';
 import { ThemeSelector } from '../shared/ThemeSelector';
 import { NotificationCenter } from './NotificationCenter';
@@ -12,30 +12,15 @@ import { NotificationCenter } from './NotificationCenter';
  */
 export const TopNavbar: React.FC<{ title?: string }> = ({ title }) => {
   const navigate = useNavigate();
-  const { currentUser, logout } = useApp();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement | null>(null);
+  const { currentUser } = useApp();
 
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const handleChangePassword = () => {
-    setMenuOpen(false);
-    navigate('/change-password');
-  };
-
-  const handleLogout = async () => {
-    setMenuOpen(false);
-    await logout();
-    navigate('/');
+  const getOverviewPath = () => {
+    switch (currentUser.role) {
+      case 'Administrator': return '/admin/dashboard';
+      case 'Agent': return '/agent/dashboard';
+      case 'Employee': return '/employee/dashboard';
+      default: return '/agent/dashboard';
+    }
   };
 
   return (
@@ -58,77 +43,45 @@ export const TopNavbar: React.FC<{ title?: string }> = ({ title }) => {
       <div className="flex items-center gap-3">
         {currentUser.role !== 'Administrator' && <NotificationCenter />}
         <ThemeSelector />
-        <div className="relative" ref={menuRef}>
-          <button
-            type="button"
-            onClick={() => setMenuOpen(prev => !prev)}
-            className="flex items-center gap-2 rounded-xl px-3 py-1.5 text-sm font-medium transition-all"
+        <button
+          type="button"
+          onClick={() => navigate(getOverviewPath())}
+          className="flex items-center gap-2.5 rounded-xl px-3.5 py-2 text-sm font-medium transition-all hover:shadow-md group cursor-pointer"
+          style={{
+            backgroundColor: 'var(--card-bg)',
+            border: '1px solid var(--border)',
+            color: 'var(--text-primary)',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.borderColor = 'var(--accent-primary)';
+            e.currentTarget.style.boxShadow = '0 4px 12px -2px var(--accent-primary), 0 0 0 1px var(--accent-primary)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.borderColor = 'var(--border)';
+            e.currentTarget.style.boxShadow = 'none';
+          }}
+        >
+          <div
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-bold transition-colors"
             style={{
-              backgroundColor: 'var(--card-bg)',
-              border: '1px solid var(--border)',
-              color: 'var(--text-primary)',
+              backgroundColor: 'var(--accent-primary-bg)',
+              color: 'var(--accent-primary)',
+              border: '1px solid var(--border-strong)',
             }}
           >
-            <div
-              className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-semibold"
-              style={{
-                backgroundColor: 'var(--accent-primary-bg)',
-                color: 'var(--accent-primary)',
-                border: '1px solid var(--border-strong)',
-              }}
-            >
-              <UserCircle2 className="w-4 h-4" />
+            <UserCircle2 className="w-4.5 h-4.5" />
+          </div>
+          <div className="hidden sm:block text-left">
+            <div className="text-xs font-semibold truncate max-w-32 leading-tight">{currentUser.name || 'Profile'}</div>
+            <div className="text-[9px] font-mono uppercase tracking-wider leading-tight" style={{ color: 'var(--text-tertiary)' }}>
+              {currentUser.role}
             </div>
-            <div className="hidden sm:block text-left">
-              <div className="text-xs font-semibold truncate max-w-32">{currentUser.name || 'Profile'}</div>
-              <div className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                {currentUser.role}
-              </div>
-            </div>
-            <ChevronDown className="w-3.5 h-3.5" style={{ color: 'var(--text-tertiary)' }} />
-          </button>
-
-          {menuOpen && (
-            <div
-              className="absolute right-0 bottom-full mb-2 w-52 rounded-xl shadow-2xl overflow-hidden"
-              style={{
-                backgroundColor: 'var(--card-bg)',
-                border: '1px solid var(--border)',
-              }}
-            >
-              <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--border)' }}>
-                <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-                  {currentUser.name}
-                </div>
-                <div className="text-xs truncate" style={{ color: 'var(--text-tertiary)' }}>
-                  {currentUser.email}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={handleChangePassword}
-                className="w-full flex items-center gap-3 px-4 py-3 text-sm transition-colors"
-                style={{ color: 'var(--text-primary)' }}
-                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--sidebar-hover)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-              >
-                <KeyRound className="w-4 h-4" style={{ color: 'var(--accent-primary)' }} />
-                <span>Change password</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="w-full flex items-center gap-3 px-4 py-3 text-sm transition-colors"
-                style={{ color: 'var(--text-primary)' }}
-                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--sidebar-hover)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-              >
-                <LogOut className="w-4 h-4" style={{ color: 'var(--text-tertiary)' }} />
-                <span>Sign out</span>
-              </button>
-            </div>
-          )}
-        </div>
+          </div>
+          <LayoutDashboard
+            className="w-3.5 h-3.5 ml-1 opacity-50 group-hover:opacity-100 transition-opacity"
+            style={{ color: 'var(--accent-primary)' }}
+          />
+        </button>
       </div>
     </header>
   );

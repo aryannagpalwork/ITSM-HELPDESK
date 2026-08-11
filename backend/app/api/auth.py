@@ -109,7 +109,7 @@ async def register(payload: RegisterRequest, db: DatabaseSession) -> dict:
         "full_name": full_name,
         "role": internal_role,
         "hashed_password": hashed_password,
-        "department": None,
+        "department": payload.department.strip() if payload.department else None,
         "status": UserStatus.PENDING.value,
         "is_active": False,
         "created_by": None,
@@ -122,7 +122,16 @@ async def register(payload: RegisterRequest, db: DatabaseSession) -> dict:
         "first_login_completed": True,
         "deleted": False,
     }
-    
+    if internal_role == "agent":
+        new_user.update({
+            "specialization": payload.specialization or [],
+            "availability": "Available",
+            "max_capacity": 10,
+            "active_ticket_count": 0,
+            "total_assigned": 0,
+            "total_resolved": 0,
+        })
+
     await db.users.insert_one(new_user)
     
     return {"detail": "Your registration request was delivered to the administrator and is now queued for approval. You can sign in after approval."}

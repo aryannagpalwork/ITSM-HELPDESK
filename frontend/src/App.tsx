@@ -1,6 +1,7 @@
 import React from 'react';
 import { HashRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AppProvider, useApp } from './shared/AppContext';
+import { ChatProvider } from './shared/ChatContext';
 import { ThemeProvider } from './shared/ThemeContext';
 
 // Import Pages (shared across roles)
@@ -90,8 +91,9 @@ export default function App() {
   return (
     <ThemeProvider>
       <AppProvider>
-        <Router>
-          <Routes>
+        <ChatProvider>
+          <Router>
+            <Routes>
             {/* Public Access Paths */}
             <Route path="/" element={<FullScreenWrapper><Landing /></FullScreenWrapper>} />
             <Route path="/login" element={<FullScreenWrapper><Login /></FullScreenWrapper>} />
@@ -266,6 +268,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Router>
+      </ChatProvider>
       </AppProvider>
     </ThemeProvider>
   );

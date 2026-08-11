@@ -108,9 +108,10 @@ export const TicketDashboard: React.FC = () => {
       || ticket.awaitingCustomerResponse === true
       || /customer|response|reply|wait(?:ing|ed)|detail required|information needed|input needed/.test(ticketText);
     const matchesView = (() => {
-      if (ticketView === 'awaiting-response') {
-        return (ticket.status === 'open' || ticket.status === 'in_progress' || ticket.status === 'waiting_for_user_response') && awaitingResponse;
-      }
+        if (ticketView === 'awaiting-response') {
+          return ticket.status === 'waiting_for_user_response'
+            || ((ticket.status === 'open' || ticket.status === 'in_progress') && awaitingResponse);
+        }
       if (ticketView === 'submitted') {
         return ticket.status === 'open' && !awaitingResponse;
       }
@@ -244,12 +245,12 @@ export const TicketDashboard: React.FC = () => {
               onChange={(e) => setStatusFilter(e.target.value)}
               className="w-full bg-transparent border-none text-xs text-secondary focus:ring-0 focus:outline-none outline-none py-1 cursor-pointer"
             >
-              <option value="all">All statuses</option>
-              <option value="open">Open</option>
-              <option value="in_progress">In Progress</option>
-              <option value="waiting_for_user_response">Waiting for User Response</option>
-              <option value="resolved">Resolved</option>
-              <option value="closed">Closed</option>
+  <option value="all">All statuses</option>
+  <option value="open">Open</option>
+  <option value="in_progress">In Progress</option>
+  <option value="waiting_for_user_response">Waiting for User Response</option>
+  <option value="resolved">Resolved</option>
+  <option value="closed">Closed</option>
               {currentUser.role === 'Administrator' && <option value="resolved_ai">Resolved by AI</option>}
             </select>
           </div>

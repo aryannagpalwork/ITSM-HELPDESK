@@ -13,6 +13,8 @@ class RegisterRequest(BaseModel):
     email: str
     password: str
     role: str
+    department: str | None = None
+    specialization: list[str] | str | None = None
 
 
 class RefreshTokenRequest(BaseModel):

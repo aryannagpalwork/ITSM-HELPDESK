@@ -35,6 +35,7 @@ interface UserEntry {
   is_active: boolean;
   createdAt: string;
   departmentId?: string;
+  specialization?: string | string[] | null;
 }
 
 interface ModalState {
@@ -69,6 +70,8 @@ export const AdminPendingUsers: React.FC = () => {
   const [formEmail, setFormEmail] = useState('');
   const [formRole, setFormRole] = useState('employee');
   const [formDepartment, setFormDepartment] = useState('');
+  const [formSpecializations, setFormSpecializations] = useState<string[]>([]);
+  const [formSpecInput, setFormSpecInput] = useState('');
   const [formPassword, setFormPassword] = useState('');
   const [formPasswordAutoGen, setFormPasswordAutoGen] = useState(true);
   const [formError, setFormError] = useState('');
@@ -96,6 +99,8 @@ const resetForm = () => {
     setFormEmail('');
     setFormRole('employee');
     setFormDepartment('');
+    setFormSpecializations([]);
+    setFormSpecInput('');
     setFormPassword('');
     setFormPasswordAutoGen(true);
     setFormError('');
@@ -112,6 +117,15 @@ const resetForm = () => {
     setFormEmail(user.email);
     setFormRole(user.role.toLowerCase() === 'administrator' ? 'admin' : user.role.toLowerCase());
     setFormDepartment(user.departmentId || '');
+    const existingSpec = user.specialization;
+    if (Array.isArray(existingSpec)) {
+      setFormSpecializations(existingSpec);
+    } else if (typeof existingSpec === 'string' && existingSpec) {
+      setFormSpecializations([existingSpec]);
+    } else {
+      setFormSpecializations([]);
+    }
+    setFormSpecInput('');
     setFormError('');
     setFormLoading(false);
     setModal({ type: 'edit', user });
@@ -149,7 +163,8 @@ const resetForm = () => {
         formEmail.trim(),
         formRole,
         formDepartment.trim() || undefined,
-        formPasswordAutoGen ? undefined : formPassword.trim()
+        formPasswordAutoGen ? undefined : formPassword.trim(),
+        formRole === 'agent' && formSpecializations.length ? formSpecializations : undefined
       );
       closeModal();
       setCreatedCredentials({ email: formEmail.trim(), password: generatedPassword });
@@ -172,7 +187,8 @@ const resetForm = () => {
         modal.user.id,
         formName.trim() || undefined,
         formDepartment.trim() || undefined,
-        formRole || undefined
+        formRole || undefined,
+        formRole === 'agent' ? formSpecializations : undefined
       );
       closeModal();
     } catch (err: unknown) {
@@ -607,6 +623,40 @@ const resetForm = () => {
                       placeholder="Engineering"
                     />
                   </div>
+                  {formRole === 'agent' && (
+                    <div>
+                      <label className="block text-[10px] font-mono uppercase text-tertiary mb-1.5">Specialization (optional)</label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={formSpecInput}
+                          onChange={(e) => setFormSpecInput(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); const v = formSpecInput.trim(); if (v && !formSpecializations.includes(v)) setFormSpecializations([...formSpecializations, v]); setFormSpecInput(''); } }}
+                          className="w-full input-token rounded-lg px-3 py-2 text-xs outline-none"
+                          placeholder="e.g. Network, Hardware"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => { const v = formSpecInput.trim(); if (v && !formSpecializations.includes(v)) setFormSpecializations([...formSpecializations, v]); setFormSpecInput(''); }}
+                          className="px-3 py-2 bg-accent/10 border border-accent/30 text-accent rounded-lg text-[10px] font-semibold hover:bg-accent/20 transition-all"
+                        >
+                          Add
+                        </button>
+                      </div>
+                      {formSpecializations.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {formSpecializations.map(spec => (
+                            <span key={spec} className="inline-flex items-center gap-1 text-[9px] px-2 py-1 rounded-full bg-accent-soft text-accent border border-token font-medium">
+                              {spec}
+                              <button type="button" onClick={() => setFormSpecializations(formSpecializations.filter(s => s !== spec))} className="hover:opacity-70">
+                                <X className="w-3 h-3" />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {/* Password Field */}
                   <div className="border-t border-token pt-4">
                     <div className="flex items-center justify-between mb-3">
@@ -685,6 +735,40 @@ const resetForm = () => {
                     <label className="block text-[10px] font-mono uppercase text-tertiary mb-1.5">Department</label>
                     <input type="text" value={formDepartment} onChange={(e) => setFormDepartment(e.target.value)} className="w-full input-token rounded-lg px-3 py-2 text-xs outline-none" />
                   </div>
+                  {formRole === 'agent' && (
+                    <div>
+                      <label className="block text-[10px] font-mono uppercase text-tertiary mb-1.5">Specialization</label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={formSpecInput}
+                          onChange={(e) => setFormSpecInput(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); const v = formSpecInput.trim(); if (v && !formSpecializations.includes(v)) setFormSpecializations([...formSpecializations, v]); setFormSpecInput(''); } }}
+                          className="w-full input-token rounded-lg px-3 py-2 text-xs outline-none"
+                          placeholder="e.g. Network, Hardware"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => { const v = formSpecInput.trim(); if (v && !formSpecializations.includes(v)) setFormSpecializations([...formSpecializations, v]); setFormSpecInput(''); }}
+                          className="px-3 py-2 bg-accent/10 border border-accent/30 text-accent rounded-lg text-[10px] font-semibold hover:bg-accent/20 transition-all"
+                        >
+                          Add
+                        </button>
+                      </div>
+                      {formSpecializations.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {formSpecializations.map(spec => (
+                            <span key={spec} className="inline-flex items-center gap-1 text-[9px] px-2 py-1 rounded-full bg-accent-soft text-accent border border-token font-medium">
+                              {spec}
+                              <button type="button" onClick={() => setFormSpecializations(formSpecializations.filter(s => s !== spec))} className="hover:opacity-70">
+                                <X className="w-3 h-3" />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="flex justify-end gap-2 mt-6">
                   <button onClick={closeModal} className="px-4 py-2 bg-card hover-elev text-secondary rounded-lg text-[10px] font-semibold transition-all">Cancel</button>

@@ -24,9 +24,11 @@ import {
   CheckCircle2,
   ExternalLink,
   RefreshCw,
+  Settings,
 } from 'lucide-react';
 import { SystemAlert } from '../../shared/types';
 import { getAutoDetectedActiveAlerts } from '../../shared/api';
+import { SLAConfigInline } from './components/SLAConfigPanel';
 
 const TicketLifecycleDetailChart = lazy(() => import('./components/charts/TicketLifecycleDetailChart'));
 const SLAComplianceChart = lazy(() => import('./components/charts/SLAComplianceChart'));
@@ -59,6 +61,8 @@ export const AdminDashboard: React.FC = () => {
   // Persistent Active Anomalies state & 30s polling
   const [activeAnomalies, setActiveAnomalies] = useState<SystemAlert[]>([]);
   const [anomaliesLoading, setAnomaliesLoading] = useState(false);
+
+  const [slaConfigOpen, setSlaConfigOpen] = useState(false);
 
   const fetchAnomalies = async () => {
     try {
@@ -411,7 +415,7 @@ export const AdminDashboard: React.FC = () => {
               </button>
             ))}
           </div>
-          <div className="flex-1 min-h-0">
+          <div className="h-[400px] shrink-0">
             <Suspense fallback={<ChartFallback />}>
               <TicketLifecycleDetailChart data={ticketTimeline} />
             </Suspense>
@@ -424,10 +428,24 @@ export const AdminDashboard: React.FC = () => {
           description="Resolved tickets compared with configured service targets"
           loading={timelinesLoading && !analytics}
           error={timelinesError}
-          empty={!timelinesLoading && !hasResolvedTickets}
-          emptyMessage="No resolved tickets found for the selected period."
           contentClassName="mt-4"
+          actions={isAdmin ? (
+            <button
+              onClick={() => setSlaConfigOpen(!slaConfigOpen)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-medium border transition-all ${
+                slaConfigOpen
+                  ? 'bg-purple-500/20 text-purple-400 border-purple-500/30'
+                  : 'bg-zinc-800/50 text-zinc-400 hover:text-white border-zinc-700/50'
+              }`}
+              title="Configure SLA targets"
+            >
+              <Settings className="w-3 h-3" />
+              Configure
+            </button>
+          ) : undefined}
         >
+          <SLAConfigInline open={slaConfigOpen} onClose={() => setSlaConfigOpen(false)} />
+
           <div className="grid grid-cols-2 gap-2.5 mb-5">
             {[
               { label: 'Overall Compliance', value: `${slaCompliance}%`, color: 'text-emerald-400', filter: 'resolved' },
@@ -447,21 +465,7 @@ export const AdminDashboard: React.FC = () => {
               </button>
             ))}
           </div>
-          <div className="grid grid-cols-2 gap-2 mb-4" aria-label="SLA target reference">
-            {[
-              { priority: 'Critical', first: '15m', resolution: '4h', color: 'text-rose-400' },
-              { priority: 'High', first: '30m', resolution: '8h', color: 'text-amber-400' },
-              { priority: 'Medium', first: '2h', resolution: '24h', color: 'text-sky-400' },
-              { priority: 'Low', first: '4h', resolution: '72h', color: 'text-emerald-400' },
-            ].map(target => (
-              <div key={target.priority} className="rounded-xl border border-token bg-card-solid px-3 py-2.5">
-                <span className={`block text-[10px] font-semibold ${target.color}`}>{target.priority}</span>
-                <span className="mt-1 block text-[9px] text-tertiary">First response <strong className="text-secondary">{target.first}</strong></span>
-                <span className="block text-[9px] text-tertiary">Resolution <strong className="text-secondary">{target.resolution}</strong></span>
-              </div>
-            ))}
-          </div>
-          <div className="h-[470px]">
+          <div className="h-[400px]">
             <Suspense fallback={<ChartFallback />}>
               <SLAComplianceChart data={slaItems} />
             </Suspense>

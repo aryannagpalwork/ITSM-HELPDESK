@@ -41,10 +41,21 @@ from app.rag.retriever import RetrievedContext
 
 logger = logging.getLogger(__name__)
 
-NO_KB_MATCH_RESPONSE = (
-    "I couldn't find enough information in the knowledge base to answer that confidently. "
-    "Please raise a support ticket if you need further assistance."
+UNKNOWN_IT_QUERY_RESPONSE = (
+    "Sorry, this time we don't have enough knowledge to answer this. Our IT team is always here to help you. Please connect with them by pressing the File/Ticket button in the sidebar."
 )
+
+# This classifier is deliberately conservative: it is only used to select the
+# no-KB fallback, never to decide whether a grounded KB answer is allowed.
+IT_QUERY_TERMS = {
+    "access", "account", "api", "app", "application", "aws", "browser", "cloud",
+    "cluster", "computer", "connection", "database", "db", "desktop", "device",
+    "email", "error", "file", "hardware", "internet", "keyboard", "laptop",
+    "login", "mfa", "monitor", "network", "okta", "outage", "password", "postgres",
+    "permission", "printer", "rds", "remote", "screen", "server", "service",
+    "software", "sql", "staging", "system", "teams", "timeout", "vpn", "wifi",
+    "wireless", "workstation",
+}
 
 GUIDED_NO_SOLUTION_RESPONSE = (
     "I couldn't fully resolve your issue using the available knowledge base.\n\n"
@@ -62,6 +73,20 @@ def _classify_query(query: str) -> str:
     if normalized in GREETING_PHRASES:
         return "GREETING"
     return "KNOWLEDGE_QUERY"
+
+
+def _is_it_related_query(query: str, original_issue: str, chat_history: list[ChatMessage]) -> bool:
+    """Identify likely IT requests for the strict no-KB fallback only."""
+    text = " ".join([
+        query or "",
+        original_issue or "",
+        # Exclude assistant history: the welcome message and prior grounded
+        # answers contain generic IT terms that must not classify an unrelated
+        # user question as an IT request.
+        " ".join(message.content for message in chat_history if message.role == MessageRole.USER),
+    ]).lower()
+    words = set(re.findall(r"[a-z0-9]+", text))
+    return bool(words & IT_QUERY_TERMS)
 
 
 def _greeting_prompt(query: str) -> BuiltPrompt:
@@ -1140,6 +1165,7 @@ async def chat(
     # The retrieval result above is authoritative for the response path.
     kb_hit = bool(retrieved_context.chunks)
     updated_metadata = dict(conversation_metadata)
+    it_related_query = _is_it_related_query(payload.query, original_issue, chat_history)
     response_query_type = query_type if kb_hit else "OUT_OF_SCOPE"
     llm_service = None
 
@@ -1217,11 +1243,7 @@ async def chat(
             len(retrieved_context.chunks),
         )
     else:
-        answer = (
-            GUIDED_NO_SOLUTION_RESPONSE
-            if guided_metadata.get("kb_articles_used") or guided_phase == "TROUBLESHOOTING"
-            else NO_KB_MATCH_RESPONSE
-        )
+        answer = UNKNOWN_IT_QUERY_RESPONSE if it_related_query else GUIDED_NO_SOLUTION_RESPONSE
         guided_state = "NO_SOLUTION"
         guided_phase = "KB_EXHAUSTED"
         guided_actions = []
@@ -1308,9 +1330,25 @@ async def chat(
             )
         )
 
-    # Step 6: Generate suggested ticket if confidence is low
+    # Step 6: Prepare a ticket draft for unknown IT questions. This is
+    # deterministic so the original question is never lost or rewritten by
+    # an LLM before the user chooses to file the ticket.
     suggested_ticket = None
-    if confidence < 0.5 and guided_state != "NO_SOLUTION":
+    if it_related_query and not kb_hit:
+        original_query = payload.query
+        context_text = _conversation_text(chat_history, payload.query)
+        suggested_ticket = {
+            "title": "IT support needed: " + original_query[:220],
+            "summary": "The Knowledge Base did not contain enough relevant information to answer this IT query.",
+            "category": "General",
+            "priority": "Medium",
+            "description": (
+                f"Original user query:\n{original_query}\n\n"
+                f"Relevant chat context:\n{context_text}"
+            ),
+            "knowledge_base_fallback": True,
+        }
+    elif confidence < 0.5 and guided_state != "NO_SOLUTION":
         # Do NOT suggest tickets for normal password-reset conversations
         is_pw_conversation = _is_password_reset_conversation(current_state) or intent is not None
         if not is_pw_conversation:
@@ -1354,6 +1392,7 @@ async def chat(
         "query_type": response_query_type,
         "response_source": "Knowledge Base" if kb_hit else "No KB Match",
         "kb_hit": kb_hit,
+        "unknown_it_fallback": bool(it_related_query and not kb_hit),
         "sources": [s.model_dump() for s in sources],
         "confidence": confidence,
         "retrieved_documents": len(sources),
@@ -1456,6 +1495,17 @@ async def escalate_to_ticket(
             detail="Chat session not found"
         )
 
+    latest_assistant = next(
+        (record for record in reversed(chat_history_records) if record.get("role") == "assistant"),
+        None,
+    )
+    latest_metadata = {}
+    if latest_assistant and latest_assistant.get("metadata_json"):
+        try:
+            latest_metadata = json.loads(latest_assistant["metadata_json"])
+        except (json.JSONDecodeError, TypeError):
+            latest_metadata = {}
+
     # Convert to ChatMessage objects
     chat_history = []
     for hist_msg in chat_history_records:
@@ -1466,12 +1516,34 @@ async def escalate_to_ticket(
         )
         chat_history.append(ChatMessage(role=role, content=hist_msg["message"]))
 
-    # Generate ticket details with LLM
-    llm_service = LLMServiceFactory.create(settings.llm_provider)
-    ticket_details, _ = llm_service.generate_ticket_details(
-        chat_history=chat_history,
-        user_feedback=payload.user_feedback
-    )
+    if latest_metadata.get("unknown_it_fallback"):
+        original_query = next(
+            (record["message"] for record in reversed(chat_history_records) if record.get("role") == "user"),
+            "IT support request",
+        )
+        transcript = "\n".join(
+            f"{'User' if record.get('role') == 'user' else 'Assistant'}: {record.get('message', '')}"
+            for record in chat_history_records
+        )
+        ticket_details = {
+            "title": "IT support needed: " + original_query[:220],
+            "summary": "The Knowledge Base did not contain enough relevant information to answer this IT query.",
+            "category": "General",
+            "priority": "Medium",
+            "description": (
+                f"Original user query:\n{original_query}\n\n"
+                f"Relevant chat context:\n{transcript}"
+                + (f"\n\nUser feedback:\n{payload.user_feedback}" if payload.user_feedback else "")
+            ),
+        }
+    else:
+        # Preserve the existing LLM-assisted ticket flow for all other chat
+        # escalations.
+        llm_service = LLMServiceFactory.create(settings.llm_provider)
+        ticket_details, _ = llm_service.generate_ticket_details(
+            chat_history=chat_history,
+            user_feedback=payload.user_feedback
+        )
 
     # Map priority
     priority_map = {

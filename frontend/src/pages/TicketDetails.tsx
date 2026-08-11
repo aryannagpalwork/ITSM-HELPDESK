@@ -34,6 +34,7 @@ export const TicketDetails: React.FC = () => {
     updateTicket,
     deleteTicket,
     addComment,
+    loadTickets,
     loadTicketAuditLogs,
     assignTicket,
     reassignTicket,
@@ -147,11 +148,11 @@ export const TicketDetails: React.FC = () => {
     if (!lifecycleDirty) return;
     setLoading('save-lifecycle');
     try {
-      const updates: Partial<Ticket> = { status: displayedStatus, priority: displayedPriority };
-      if (draftResolution !== undefined) updates.resolution = draftResolution;
-      await updateTicket(ticket.id, updates, lifecycleReason);
+      const updates: Partial<Ticket> = { status: displayedStatus };
+      const updatedTicket = await updateTicket(ticket.id, updates, lifecycleReason);
       const updatedAuditLogs = await loadTicketAuditLogs(ticket.id);
       setAuditLogs(updatedAuditLogs);
+      setFetchedTicket(updatedTicket);
       resetLifecycleDraft();
       setToast({ message: 'Lifecycle changes saved successfully!', type: 'success' });
     } catch (error) {
@@ -170,7 +171,7 @@ export const TicketDetails: React.FC = () => {
       assignedTo: currentUser.role === 'Agent' ? currentUser.id : null,
     });
 
-    if (currentUser.role !== 'Administrator') {
+    if (currentUser.role === 'Employee') {
       setAgents([]);
       return;
     }
@@ -185,13 +186,19 @@ export const TicketDetails: React.FC = () => {
     }
   };
 
-  const handleSubmitComment = (e: React.FormEvent) => {
+  const handleSubmitComment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!commentInput.trim()) return;
+    if (!commentInput.trim() || !ticket) return;
 
-    addComment(ticket.id, commentInput, isInternalComment);
+    await addComment(ticket.id, commentInput, isInternalComment);
     setCommentInput('');
     setIsInternalComment(false);
+
+    // Reload ticket data (backend auto-transitions awaiting_user_response → in_progress
+    // when an employee sends a non-internal comment)
+    await loadTickets();
+    // Reload audit logs so the new comment + any status change appear in the timeline
+    loadTicketAuditLogs(ticket.id).then(setAuditLogs);
   };
 
   const handleDelete = () => {
@@ -237,7 +244,12 @@ export const TicketDetails: React.FC = () => {
             return;
           }
           await reassignTicket(ticket.id, modalData.assignedTo, modalData.reason || undefined);
-          setToast({ message: 'Ticket reassigned successfully!', type: 'success' });
+          setToast({ message: 'Ticket reassigned successfully! Redirecting...', type: 'success' });
+          setTimeout(() => {
+            if (currentUser.role === 'Agent') navigate('/agent/tickets');
+            else if (currentUser.role === 'Administrator') navigate('/admin/tickets');
+            else navigate('/tickets');
+          }, 1200);
           break;
       }
       // Refresh audit logs after action
@@ -283,8 +295,8 @@ export const TicketDetails: React.FC = () => {
         return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
       case 'in_progress':
         return 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20';
-      case 'waiting_for_user_response':
-        return 'bg-amber-500/10 text-amber-400 border border-amber-500/20';
+  case 'waiting_for_user_response':
+    return 'bg-amber-500/10 text-amber-400 border border-amber-500/20';
       case 'resolved':
         return 'bg-sky-500/10 text-sky-400 border border-sky-500/20';
       case 'closed':
@@ -312,6 +324,8 @@ export const TicketDetails: React.FC = () => {
         return <XCircle className="w-3 h-3" />;
       case 'ticket.reopened':
         return <RotateCcw className="w-3 h-3" />;
+      case 'ticket.commented':
+        return <Send className="w-3 h-3" />;
       case 'ticket.deleted':
         return <Trash2 className="w-3 h-3" />;
       default:
@@ -339,6 +353,8 @@ export const TicketDetails: React.FC = () => {
         return 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20';
       case 'ticket.reopened':
         return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+      case 'ticket.commented':
+        return 'bg-teal-500/10 text-teal-400 border-teal-500/20';
       case 'ticket.deleted':
         return 'bg-rose-500/10 text-rose-400 border-rose-500/20';
       default:
@@ -355,12 +371,30 @@ export const TicketDetails: React.FC = () => {
     >
       {/* Toast Notification */}
       {toast && (
-        <div className={`fixed top-4 right-4 z-50 flex items-center gap-3 px-4 py-3 rounded-xl border shadow-lg ${
-          toast.type === 'success' 
-            ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' 
-            : 'bg-rose-500/10 border-rose-500/20 text-rose-300'
-        }`}>
-          {toast.type === 'success' ? <Check className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+        <div
+          className="fixed top-4 right-4 z-50 flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-2xl animate-in slide-in-from-top-4 fade-in duration-300"
+          style={{
+            backgroundColor: toast.type === 'success' ? '#064e3b' : '#450a0a',
+            border: `1px solid ${toast.type === 'success' ? 'rgba(16,185,129,0.5)' : 'rgba(239,68,68,0.5)'}`,
+            color: toast.type === 'success' ? '#a7f3d0' : '#fecaca',
+            boxShadow: toast.type === 'success'
+              ? '0 20px 40px -8px rgba(16,185,129,0.35), 0 8px 16px -4px rgba(0,0,0,0.4)'
+              : '0 20px 40px -8px rgba(239,68,68,0.35), 0 8px 16px -4px rgba(0,0,0,0.4)',
+          }}
+        >
+          <div
+            className="shrink-0 p-1.5 rounded-lg"
+            style={{
+              backgroundColor: toast.type === 'success' ? 'rgba(16,185,129,0.25)' : 'rgba(239,68,68,0.25)',
+              border: `1px solid ${toast.type === 'success' ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.35)'}`,
+            }}
+          >
+            {toast.type === 'success' ? (
+              <Check className="w-4 h-4 text-emerald-400" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-rose-400" />
+            )}
+          </div>
           <span className="text-xs font-semibold">{toast.message}</span>
         </div>
       )}
@@ -398,48 +432,75 @@ export const TicketDetails: React.FC = () => {
                 </div>
               )}
 
-              {currentUser.role === 'Administrator' && (modal.action === 'assign' || modal.action === 'reassign') && (
+              {(currentUser.role === 'Administrator' || currentUser.role === 'Agent') && (modal.action === 'assign' || modal.action === 'reassign') && (
                 <div>
                   <label className="block text-xs font-mono text-secondary uppercase tracking-wider mb-1.5">
                     Select Target Agent
                   </label>
                   {agents.length === 0 ? (
-                    <div className="p-3 bg-input border border-dashed border-token rounded-lg text-center">
-                      <p className="text-[10px] text-tertiary">No other eligible agents found.</p>
+                    <div className="p-4 bg-input border border-dashed border-token rounded-xl text-center">
+                      <UserCircle2 className="w-8 h-8 text-tertiary mx-auto mb-2" />
+                      <p className="text-[11px] text-tertiary font-medium">No other eligible agents found.</p>
+                      <p className="text-[9px] text-tertiary mt-1">All agents may be on leave or unavailable.</p>
                     </div>
                   ) : (
-                    <select
-                      id="ticket-assignee"
-                      name="assignedTo"
-                      value={modalData.assignedTo || ''}
-                      onChange={(e) => setModalData({ ...modalData, assignedTo: e.target.value || null })}
-                      className="w-full input-token rounded-lg p-2.5 text-xs outline-none cursor-pointer"
-                    >
-                      <option value="">-- Select an agent --</option>
-                      {agents.map((agent) => (
-                        <option key={agent.agentId} value={agent.agentId}>
-                          {agent.name} - {agent.openTicketCount} open tickets{agent.onLeaveToday ? ' - On leave' : ''}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  {modalData.assignedTo && agents.find(a => a.agentId === modalData.assignedTo) && (
-                    <div className="mt-2 p-2 bg-input border border-token rounded-lg">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-xs text-secondary font-semibold">
-                            {agents.find(a => a.agentId === modalData.assignedTo)?.name}
-                          </p>
-                          <div className="text-[9px] text-tertiary flex items-center gap-2 flex-wrap">
-                            <span>{agents.find(a => a.agentId === modalData.assignedTo)?.openTicketCount} open tickets</span>
-                            {agents.find(a => a.agentId === modalData.assignedTo)?.onLeaveToday && (
-                              <span className="text-[8px] font-mono uppercase px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                                On leave
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
+                    <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                      {agents.map((agent) => {
+                        const isSelected = modalData.assignedTo === agent.agentId;
+                        const specs = agent.specialization
+                          ? Array.isArray(agent.specialization) ? agent.specialization : [agent.specialization]
+                          : [];
+                        return (
+                          <button
+                            key={agent.agentId}
+                            type="button"
+                            onClick={() => setModalData({ ...modalData, assignedTo: agent.agentId })}
+                            className={`w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all cursor-pointer border ${
+                              isSelected
+                                ? 'border-accent shadow-sm'
+                                : 'border-token hover:border-secondary'
+                            }`}
+                            style={{
+                              backgroundColor: isSelected ? 'var(--accent-primary-bg, var(--input-bg))' : 'var(--input-bg)',
+                            }}
+                          >
+                            <div
+                              className="w-9 h-9 rounded-lg flex items-center justify-center text-[10px] font-bold shrink-0"
+                              style={{
+                                backgroundColor: isSelected ? 'var(--accent-primary)' : 'var(--card-bg)',
+                                color: isSelected ? 'var(--accent-primary-contrast, #fff)' : 'var(--text-secondary)',
+                                border: `1px solid ${isSelected ? 'var(--accent-primary)' : 'var(--border)'}`,
+                              }}
+                            >
+                              {agent.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-semibold text-primary truncate">{agent.name}</span>
+                                {agent.onLeaveToday && (
+                                  <span className="text-[8px] font-mono uppercase px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 shrink-0">
+                                    On Leave
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                {agent.department && (
+                                  <span className="text-[9px] text-tertiary">{agent.department}</span>
+                                )}
+                                {specs.length > 0 && (
+                                  <span className="text-[8px] font-mono px-1.5 py-0.5 rounded-full bg-accent-soft text-accent border border-token">
+                                    {specs.slice(0, 2).join(', ')}{specs.length > 2 ? ` +${specs.length - 2}` : ''}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <div className="text-xs font-bold text-secondary">{agent.openTicketCount}</div>
+                              <div className="text-[8px] text-tertiary font-mono uppercase">open</div>
+                            </div>
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -647,6 +708,8 @@ export const TicketDetails: React.FC = () => {
                             ? 'bg-zinc-500'
                             : log.action.includes('reopened') || log.action.includes('reassigned')
                             ? 'bg-amber-500'
+                            : log.action.includes('commented')
+                            ? 'bg-teal-500'
                             : 'bg-indigo-500'
                         }`}
                       />
@@ -669,41 +732,59 @@ export const TicketDetails: React.FC = () => {
                       </div>
 
                       <div className="text-xs text-secondary">
-                        {log.metadata?.field && (
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold text-secondary">{log.metadata.field}:</span>
-                            <span className="line-through text-tertiary">
-                              {log.metadata.old_value || '(empty)'}
-                            </span>
-                            <span className="text-secondary">→</span>
-                            <span className="font-semibold text-accent">
-                              {log.metadata.new_value || '(empty)'}
-                            </span>
+                        {log.action === 'ticket.commented' && log.metadata?.field ? (
+                          <div className="mt-1">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <span className={`inline-flex items-center gap-1 text-[9px] font-semibold px-1.5 py-0.5 rounded border ${
+                                log.metadata.field === 'Internal Note'
+                                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                                  : 'bg-teal-500/10 text-teal-400 border-teal-500/20'
+                              }`}>
+                                {log.metadata.field === 'Internal Note' ? <Lock className="w-2.5 h-2.5" /> : <Send className="w-2.5 h-2.5" />}
+                                {log.metadata.field}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-secondary leading-relaxed whitespace-pre-wrap">{log.metadata.new_value}</p>
                           </div>
-                        )}
-                        {log.metadata?.changes && (
-                          <div className="space-y-1">
-                            {log.metadata.changes.map((change, index) => (
-                              <div key={index} className="flex items-center gap-2">
-                                <span className="font-semibold text-secondary">{change.field}:</span>
+                        ) : (
+                          <>
+                            {log.metadata?.field && (
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold text-secondary">{log.metadata.field}:</span>
                                 <span className="line-through text-tertiary">
-                                  {change.old_value || '(empty)'}
+                                  {log.metadata.old_value || '(empty)'}
                                 </span>
                                 <span className="text-secondary">→</span>
                                 <span className="font-semibold text-accent">
-                                  {change.new_value || '(empty)'}
+                                  {log.metadata.new_value || '(empty)'}
                                 </span>
                               </div>
-                            ))}
-                          </div>
-                        )}
-                        {log.reason && (
-                          <div className="mt-1.5 text-xs text-tertiary italic">
-                            Reason: {log.reason}
-                          </div>
-                        )}
-                        {!log.metadata?.field && !log.metadata?.changes && !log.reason && (
-                          <span>Action recorded</span>
+                            )}
+                            {log.metadata?.changes && (
+                              <div className="space-y-1">
+                                {log.metadata.changes.map((change, index) => (
+                                  <div key={index} className="flex items-center gap-2">
+                                    <span className="font-semibold text-secondary">{change.field}:</span>
+                                    <span className="line-through text-tertiary">
+                                      {change.old_value || '(empty)'}
+                                    </span>
+                                    <span className="text-secondary">→</span>
+                                    <span className="font-semibold text-accent">
+                                      {change.new_value || '(empty)'}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {log.reason && (
+                              <div className="mt-1.5 text-xs text-tertiary italic">
+                                Reason: {log.reason}
+                              </div>
+                            )}
+                            {!log.metadata?.field && !log.metadata?.changes && !log.reason && (
+                              <span>Action recorded</span>
+                            )}
+                          </>
                         )}
                       </div>
                     </div>
@@ -780,11 +861,11 @@ export const TicketDetails: React.FC = () => {
                       onChange={(e) => handleStatusChange(e.target.value as TicketStatus)}
                       className="w-full input-token rounded-lg p-2.5 text-xs outline-none cursor-pointer"
                     >
-                      <option value="open">Open</option>
-                      <option value="in_progress">In Progress</option>
-                      <option value="waiting_for_user_response">Waiting for User Response</option>
-                      <option value="resolved">Resolved</option>
-                      <option value="closed">Closed</option>
+          <option value="open">Open</option>
+          <option value="in_progress">In Progress</option>
+          <option value="waiting_for_user_response">Waiting for User Response</option>
+          <option value="resolved">Resolved</option>
+          <option value="closed">Closed</option>
                     </select>
                   ) : (
                     <div className="flex items-center justify-between">
@@ -970,8 +1051,8 @@ export const TicketDetails: React.FC = () => {
                       <h5 className="text-[11px] font-semibold text-primary">{ticket.agentName}</h5>
                       <p className="text-[9px] text-tertiary font-mono">Assigned Service Agent</p>
                     </div>
-                  </div>
-                  {currentUser.role === 'Administrator' && (
+                   </div>
+                  {(currentUser.role === 'Administrator' || currentUser.role === 'Agent') && (
                     <button
                       onClick={() => openAssignmentModal('reassign')}
                       disabled={loading === 'reassign'}

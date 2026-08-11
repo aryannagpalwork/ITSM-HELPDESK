@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import {
+  Area,
+  AreaChart,
   CartesianGrid,
   Label,
-  Line,
-  LineChart,
   ReferenceDot,
   ResponsiveContainer,
   Tooltip,
@@ -116,10 +116,18 @@ const TicketLifecycleDetailChart: React.FC<Props> = ({ data }) => {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 pt-5">
+      <div className="min-h-[180px] flex-1 shrink-0 pt-5">
         {hasData ? (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={points} margin={{ top: 14, right: 10, left: 8, bottom: 30 }}>
+            <AreaChart data={points} margin={{ top: 14, right: 10, left: 8, bottom: 30 }}>
+              <defs>
+                {SERIES.map(s => (
+                  <linearGradient key={s.key} id={`lifecycle-${s.key}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={s.color} stopOpacity={0.2} />
+                    <stop offset="95%" stopColor={s.color} stopOpacity={0} />
+                  </linearGradient>
+                ))}
+              </defs>
               <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} strokeOpacity={0.25} vertical={false} />
               <XAxis dataKey="label" stroke={chart.stroke} fontSize={9} tickLine={false} minTickGap={16} tickFormatter={formatDate}>
                 <Label value="Date" position="bottom" offset={12} fill={chart.stroke} fontSize={10} />
@@ -132,13 +140,14 @@ const TicketLifecycleDetailChart: React.FC<Props> = ({ data }) => {
                 content={<TooltipContent />}
               />
               {SERIES.map(series => visible[series.key] && (
-                <Line
+                <Area
                   key={series.key}
                   type="monotone"
                   dataKey={series.key}
                   name={series.label}
                   stroke={series.color}
                   strokeWidth={2.25}
+                  fill={`url(#lifecycle-${series.key})`}
                   dot={false}
                   connectNulls
                   activeDot={{ r: 5, strokeWidth: 2, stroke: chart.tooltipBg }}
@@ -154,7 +163,7 @@ const TicketLifecycleDetailChart: React.FC<Props> = ({ data }) => {
               {selected && visible[selected.key] && (
                 <ReferenceDot x={selected.label} y={selected.value} r={5} fill={SERIES.find(series => series.key === selected.key)?.color} stroke={chart.tooltipBg} strokeWidth={2} />
               )}
-            </LineChart>
+            </AreaChart>
           </ResponsiveContainer>
         ) : (
           <div className="flex h-full items-center justify-center text-center text-[10px] text-tertiary">No lifecycle data available for the selected period.</div>
@@ -210,7 +219,15 @@ const TicketLifecycleDetailChart: React.FC<Props> = ({ data }) => {
               {hasData && (
                 <div className="mb-5 h-[320px] rounded-xl border border-token bg-app p-3">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={points} margin={{ top: 16, right: 18, left: 8, bottom: 28 }}>
+                    <AreaChart data={points} margin={{ top: 16, right: 18, left: 8, bottom: 28 }}>
+                      <defs>
+                        {SERIES.map(s => (
+                          <linearGradient key={s.key} id={`lifecycle-full-${s.key}`} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor={s.color} stopOpacity={0.2} />
+                            <stop offset="95%" stopColor={s.color} stopOpacity={0} />
+                          </linearGradient>
+                        ))}
+                      </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} strokeOpacity={0.25} vertical={false} />
                       <XAxis dataKey="label" stroke={chart.stroke} fontSize={10} tickLine={false} minTickGap={18} tickFormatter={formatDate}>
                         <Label value="Date" position="bottom" offset={10} fill={chart.stroke} fontSize={10} />
@@ -220,9 +237,9 @@ const TicketLifecycleDetailChart: React.FC<Props> = ({ data }) => {
                       </YAxis>
                       <Tooltip cursor={{ stroke: chart.stroke, strokeDasharray: '4 4', strokeOpacity: 0.7 }} content={<TooltipContent />} />
                       {SERIES.map(series => visible[series.key] && (
-                        <Line key={series.key} type="monotone" dataKey={series.key} name={series.label} stroke={series.color} strokeWidth={2.5} dot={false} connectNulls isAnimationActive animationDuration={700} />
+                        <Area key={series.key} type="monotone" dataKey={series.key} name={series.label} stroke={series.color} strokeWidth={2.5} fill={`url(#lifecycle-full-${series.key})`} dot={false} connectNulls isAnimationActive animationDuration={700} />
                       ))}
-                    </LineChart>
+                    </AreaChart>
                   </ResponsiveContainer>
                 </div>
               )}

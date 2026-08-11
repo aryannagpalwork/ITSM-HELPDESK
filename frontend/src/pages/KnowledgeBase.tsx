@@ -18,7 +18,7 @@ export const KnowledgeBase: React.FC = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  const categories = ['all', 'Authentication', 'Network', 'Procurement', 'Software', 'Other'];
+  const categories = ['all'];
 
   const loadDocuments = async () => {
     setIsLoading(true);
@@ -121,20 +121,8 @@ export const KnowledgeBase: React.FC = () => {
       </div>
 
       <div className="bg-card border border-token rounded-2xl p-4 mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center space-x-1.5 overflow-x-auto pb-2 md:pb-0 scrollbar-none shrink-0">
-          {categories.map(cat => (
-            <button
-              key={cat}
-              onClick={() => setActiveCategory(cat)}
-              className={`px-3.5 py-1.5 text-[11px] rounded-lg font-medium capitalize border transition-all cursor-pointer whitespace-nowrap ${
-                activeCategory === cat
-                  ? 'bg-accent-soft text-accent border-token-strong font-semibold'
-                  : 'bg-card-solid border-token text-secondary hover-text'
-              }`}
-            >
-              {cat === 'all' ? 'All Documents' : cat}
-            </button>
-          ))}
+        <div className="flex items-center space-x-1.5 shrink-0">
+          <span className="text-xs font-semibold text-primary">All Documents</span>
         </div>
 
         <div className="relative flex items-center w-full md:max-w-xs">
@@ -303,18 +291,13 @@ export const KnowledgeBase: React.FC = () => {
                 <label className="block text-[10px] font-mono uppercase tracking-wider text-tertiary mb-1">
                   Category
                 </label>
-                <select
+                <input
+                  type="text"
+                  placeholder="e.g. General, IT, Security"
                   value={uploadCategory}
                   onChange={(e) => setUploadCategory(e.target.value)}
-                  className="w-full input-token rounded-lg p-2 text-xs outline-none cursor-pointer"
-                >
-                  <option value="">Select a category</option>
-                  <option value="Authentication">Authentication</option>
-                  <option value="Network">Network</option>
-                  <option value="Procurement">Procurement</option>
-                  <option value="Software">Software</option>
-                  <option value="Other">Other</option>
-                </select>
+                  className="w-full input-token rounded-lg px-3 py-2 text-xs outline-none"
+                />
               </div>
 
               <div>

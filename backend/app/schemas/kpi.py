@@ -70,6 +70,7 @@ class EmployeeKPIs(BaseModel):
     mttrHours: float = 0.0
     fcrRate: float = 0.0
     avgFirstResponseHours: float = 0.0
+    firstResponseSlaCompliance: float = 0.0
     reopenedTickets: int = 0
     aiCopilot: AICopilotEmployeeKPIs = Field(default_factory=AICopilotEmployeeKPIs)
 
@@ -95,6 +96,7 @@ class AgentKPIs(BaseModel):
     aiMttrHours: float = 0.0
     agentFcrRate: float = 0.0
     avgFirstResponseHours: float = 0.0
+    firstResponseSlaCompliance: float = 0.0
     resolutionRate: float = 0.0
     slaCompliance: float = 0.0
     reopenRate: float = 0.0
@@ -122,6 +124,7 @@ class AdminKPIs(BaseModel):
     activeSlaTickets: int = 0
     nearBreachTickets: int = 0
     criticalSlaBreaches: int = 0
+    firstResponseSlaCompliance: float = 0.0
     ticketBacklog: int = 0
     aiResolutionRate: float = 0.0
     aiQueries: int = 0

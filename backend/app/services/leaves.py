@@ -45,7 +45,7 @@ async def _count_open_tickets(db: AsyncIOMotorDatabase, agent_id: str) -> int:
     return await db.tickets.count_documents(
         {
             "assigned_to": agent_id,
-            "status": {"$in": ["Open", "In Progress"]},
+            "status": {"$in": ["Open", "In Progress", "Waiting for User Response"]},
         }
     )
 
@@ -252,6 +252,8 @@ async def list_agents_availability(
                 name=agent.get("full_name", ""),
                 on_leave_today=agent["_id"] in current_leave_agent_ids,
                 open_ticket_count=open_ticket_count,
+                department=agent.get("department"),
+                specialization=agent.get("specialization", []),
             )
         )
 

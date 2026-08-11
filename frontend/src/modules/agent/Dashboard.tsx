@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../shared/AppContext';
 import { useTheme } from '../../shared/ThemeContext';
@@ -23,11 +23,15 @@ import {
   RefreshCcw,
   TrendingUp,
   X,
-  ArrowUpRight
+  ArrowUpRight,
+  ArrowLeftRight,
+  Send,
+  CheckCircle,
+  Bell,
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts';
 import { TicketPriority, TicketStatus, AgentMetrics, TimelineRange, TicketLifecycleTimeline } from '../../shared/types';
-import { getAgentTicketTimeline } from '../../shared/api';
+import { getAgentTicketTimeline, listAgents, getTicketAuditLogs } from '../../shared/api';
 import { RangeToggle } from '../admin/components/RangeToggle';
 import TicketLifecycleDetailChart from '../admin/components/charts/TicketLifecycleDetailChart';
 import { UpcomingActionsStepper } from '../../components/UpcomingActionsStepper';
@@ -45,6 +49,7 @@ const getStatusBadgeStyle = (status: TicketStatus, tokens: any) => {
   switch (status) {
     case 'open': return { backgroundColor: tokens.statusSuccessBg, color: tokens.statusSuccess, border: `1px solid ${tokens.statusSuccess}33` };
     case 'in_progress': return { backgroundColor: tokens.accentPrimaryBg, color: tokens.accentPrimary, border: `1px solid ${tokens.accentPrimary}33` };
+    case 'waiting_for_user_response': return { backgroundColor: tokens.statusWarningBg || 'rgba(245,158,11,0.1)', color: tokens.statusWarning || '#f59e0b', border: `1px solid ${tokens.statusWarning || '#f59e0b'}33` };
     case 'resolved': return { backgroundColor: tokens.statusInfoBg, color: tokens.statusInfo, border: `1px solid ${tokens.statusInfo}33` };
     case 'closed': return { backgroundColor: tokens.hover, color: tokens.textTertiary, border: `1px solid ${tokens.border}` };
   }
@@ -152,7 +157,7 @@ const KpiCard: React.FC<{
 
 export const AgentDashboard: React.FC = () => {
   const navigate = useNavigate();
-  const { currentUser, tickets, createTicket, agentMetrics, loadAgentMetrics, loadTickets, roleAgentKPIs, loadRoleAgentKPIs, kpisLoading, kpisError } = useApp();
+  const { currentUser, tickets, createTicket, agentMetrics, loadAgentMetrics, loadTickets, roleAgentKPIs, loadRoleAgentKPIs, kpisLoading, kpisError, reassignTicket } = useApp();
   const { tokens, chart } = useTheme();
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -165,6 +170,18 @@ export const AgentDashboard: React.FC = () => {
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [assignmentFilter, setAssignmentFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<string>('priority');
+
+  // Reassignment modal state
+  const [reassignModal, setReassignModal] = useState<{ ticketId: string; ticketNumber: string; ticketTitle: string } | null>(null);
+  const [reassignAgent, setReassignAgent] = useState('');
+  const [reassignReason, setReassignReason] = useState('');
+  const [reassignLoading, setReassignLoading] = useState(false);
+  const [agentList, setAgentList] = useState<{ id: string; name: string; email: string; department?: string; specialization?: string | string[]; status: string; activeTicketCount: number; available: boolean }[]>([]);
+  const [reassignSuccess, setReassignSuccess] = useState<{ ticketNumber: string; agentName: string } | null>(null);
+
+  // Reassignment-away detection
+  const [reassignAlerts, setReassignAlerts] = useState<{ ticketNumber: string; agentName: string; ticketId: string }[]>([]);
+  const prevAssignedIdsRef = useRef<Set<string>>(new Set());
 
   // Chart controls: date range + card-driven filter (mirrors the admin dashboard).
   const [range, setRange] = useState<TimelineRange>('7d');
@@ -203,6 +220,44 @@ export const AgentDashboard: React.FC = () => {
       clearInterval(interval);
       window.removeEventListener('focus', refreshLive);
     };
+  }, []);
+
+  // Detect tickets reassigned AWAY from this agent on each refresh
+  useEffect(() => {
+    const currentAssignedIds = new Set(
+      tickets.filter(t => t.agentId === currentUser.id).map(t => t.id)
+    );
+    const prevIds = prevAssignedIdsRef.current;
+
+    if (prevIds.size > 0) {
+      const removedIds = [...prevIds].filter(id => !currentAssignedIds.has(id));
+      if (removedIds.length > 0) {
+        removedIds.forEach(ticketId => {
+          const ticket = tickets.find(t => t.id === ticketId);
+          const ticketNumber = ticket?.ticketNumber || ticketId.slice(0, 8);
+          getTicketAuditLogs(ticketId).then(logs => {
+            const reassignLog = [...logs].reverse().find(l => l.action === 'ticket.reassigned');
+            if (reassignLog) {
+              const newAgentId = reassignLog.metadata?.new_value;
+              const newAgentName = reassignLog.user_name || 'Another agent';
+              setReassignAlerts(prev => {
+                if (prev.some(a => a.ticketId === ticketId)) return prev;
+                return [...prev, { ticketNumber, agentName: newAgentName, ticketId }];
+              });
+              setTimeout(() => {
+                setReassignAlerts(prev => prev.filter(a => a.ticketId !== ticketId));
+              }, 8000);
+            }
+          }).catch(() => {});
+        });
+      }
+    }
+
+    prevAssignedIdsRef.current = currentAssignedIds;
+  }, [tickets, currentUser.id]);
+
+  const dismissReassignAlert = useCallback((ticketId: string) => {
+    setReassignAlerts(prev => prev.filter(a => a.ticketId !== ticketId));
   }, []);
 
   const filteredTickets = useMemo(() => {
@@ -305,6 +360,39 @@ export const AgentDashboard: React.FC = () => {
     setNewDesc('');
     setNewPriority('medium');
     setIsCreateOpen(false);
+  };
+
+  const openReassignModal = async (ticketId: string, ticketNumber: string, ticketTitle: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setReassignModal({ ticketId, ticketNumber, ticketTitle });
+    setReassignAgent('');
+    setReassignReason('');
+    try {
+      const agents = await listAgents();
+      setAgentList(agents.filter(a => a.id !== currentUser.id));
+    } catch {
+      setAgentList([]);
+    }
+  };
+
+  const handleReassign = async () => {
+    if (!reassignModal || !reassignAgent) return;
+    setReassignLoading(true);
+    try {
+      const selectedAgent = agentList.find(a => a.id === reassignAgent);
+      await reassignTicket(reassignModal.ticketId, reassignAgent, reassignReason || undefined);
+      setReassignModal(null);
+      setReassignSuccess({
+        ticketNumber: reassignModal.ticketNumber,
+        agentName: selectedAgent?.name || 'Unknown Agent',
+      });
+      loadTickets({ assignment: 'all' });
+      setTimeout(() => setReassignSuccess(null), 5000);
+    } catch (err) {
+      // Error handled silently
+    } finally {
+      setReassignLoading(false);
+    }
   };
 
   const areaData = useMemo(() => {
@@ -625,11 +713,12 @@ export const AgentDashboard: React.FC = () => {
               className="w-full bg-transparent border-none text-[10px] focus:ring-0 outline-none py-0.5 cursor-pointer"
               style={{ color: tokens.textSecondary }}
             >
-              <option value="all">All</option>
-              <option value="open">Open</option>
-              <option value="in_progress">In Progress</option>
-              <option value="resolved">Resolved</option>
-              <option value="closed">Closed</option>
+    <option value="all">All</option>
+    <option value="open">Open</option>
+    <option value="in_progress">In Progress</option>
+    <option value="waiting_for_user_response">Awaiting User Response</option>
+    <option value="resolved">Resolved</option>
+    <option value="closed">Closed</option>
             </select>
           </div>
 
@@ -723,7 +812,7 @@ export const AgentDashboard: React.FC = () => {
                         className="text-[8px] font-mono uppercase px-1.5 py-0.5 rounded-full font-semibold"
                         style={getStatusBadgeStyle(ticket.status, tokens)}
                       >
-                        {ticket.status.replace('_', ' ')}
+                        {ticket.status === 'waiting_for_user_response' ? 'Awaiting User Response' : ticket.status.replace('_', ' ')}
                       </span>
                       {ticket.aiAnalysisEstimatedSla && (
                         <span 
@@ -760,26 +849,17 @@ export const AgentDashboard: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-4 shrink-0">
-                    <div className="hidden sm:block w-24">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-[7px] font-mono uppercase" style={{ color: tokens.textTertiary }}>Progress</span>
-                        <span className="text-[7px] font-mono" style={{ color: tokens.textSecondary }}>{getProgressForStatus(ticket.status)}%</span>
-                      </div>
-                      <div 
-                        className="w-full h-1.5 rounded-full overflow-hidden"
-                        style={{ backgroundColor: tokens.cardBgSolid }}
-                      >
-                        <div 
-                          className="h-full rounded-full transition-all"
-                          style={{ 
-                            width: `${getProgressForStatus(ticket.status)}%`,
-                            background: `linear-gradient(to right, ${tokens.accentPrimary}, ${tokens.accentPrimary}cc)`
-                          }}
-                        />
-                      </div>
-                      <span className="text-[7px] mt-0.5 block" style={{ color: tokens.textTertiary }}>{getResolutionStage(ticket.status)}</span>
-                    </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={(e) => openReassignModal(ticket.id, ticket.ticketNumber || ticket.id, ticket.title, e)}
+                      className="px-2 py-1.5 rounded-lg text-[9px] font-semibold flex items-center gap-1 transition-all cursor-pointer opacity-0 group-hover:opacity-100"
+                      style={{ backgroundColor: `${tokens.statusWarning}15`, border: `1px solid ${tokens.statusWarning}33`, color: tokens.statusWarning }}
+                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = `${tokens.statusWarning}25`; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = `${tokens.statusWarning}15`; }}
+                      title="Reassign ticket"
+                    >
+                      <ArrowLeftRight className="w-3 h-3" />
+                    </button>
                     <ChevronRight 
                       className="w-4 h-4 transition-colors shrink-0" 
                       style={{ color: tokens.textTertiary }}
@@ -889,6 +969,242 @@ export const AgentDashboard: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Reassignment-Away Alerts */}
+      {reassignAlerts.map(alert => (
+        <div
+          key={alert.ticketId}
+          className="fixed top-6 right-6 z-[70] animate-in slide-in-from-top-4 fade-in duration-300"
+          style={{ maxWidth: '420px' }}
+        >
+          <div
+            className="flex items-start gap-3 p-4 rounded-xl shadow-2xl"
+            style={{
+              backgroundColor: '#451a03',
+              border: '1px solid rgba(245,158,11,0.5)',
+              boxShadow: '0 20px 40px -8px rgba(245,158,11,0.3), 0 8px 16px -4px rgba(0,0,0,0.4)',
+            }}
+          >
+            <div
+              className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center"
+              style={{ backgroundColor: 'rgba(245,158,11,0.25)', border: '1px solid rgba(245,158,11,0.35)' }}
+            >
+              <Bell className="w-5 h-5 text-amber-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold text-amber-200">Ticket Reassigned</p>
+              <p className="text-[10px] mt-1 text-amber-300/80 leading-relaxed">
+                <span className="font-mono font-semibold text-amber-200">{alert.ticketNumber}</span>
+                {' '}has been reassigned to{' '}
+                <span className="font-semibold text-amber-200">{alert.agentName}</span>
+                {' '}and is no longer in your queue.
+              </p>
+            </div>
+            <button
+              onClick={() => dismissReassignAlert(alert.ticketId)}
+              className="shrink-0 p-1 rounded-md transition-colors text-amber-400/60 hover:text-amber-200"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      ))}
+
+      {/* Reassignment Success Toast */}
+      {reassignSuccess && (
+        <div
+          className="fixed top-6 right-6 z-[70] animate-in slide-in-from-top-4 fade-in duration-300"
+          style={{ maxWidth: '420px' }}
+        >
+          <div
+            className="flex items-start gap-3 p-4 rounded-xl shadow-2xl"
+            style={{
+              backgroundColor: '#064e3b',
+              border: '1px solid rgba(16,185,129,0.5)',
+              boxShadow: '0 20px 40px -8px rgba(16,185,129,0.35), 0 8px 16px -4px rgba(0,0,0,0.4)',
+            }}
+          >
+            <div
+              className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center"
+              style={{ backgroundColor: 'rgba(16,185,129,0.25)', border: '1px solid rgba(16,185,129,0.35)' }}
+            >
+              <CheckCircle className="w-5 h-5 text-emerald-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold text-emerald-200">Ticket Reassigned Successfully</p>
+              <p className="text-[10px] mt-1 text-emerald-300/80 leading-relaxed">
+                <span className="font-mono font-semibold text-emerald-200">{reassignSuccess.ticketNumber}</span>
+                {' '}has been reassigned to{' '}
+                <span className="font-semibold text-emerald-200">{reassignSuccess.agentName}</span>
+              </p>
+            </div>
+            <button
+              onClick={() => setReassignSuccess(null)}
+              className="shrink-0 p-1 rounded-md transition-colors text-emerald-400/60 hover:text-emerald-200"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Reassignment Modal */}
+      {reassignModal && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 backdrop-blur-sm"
+          style={{ backgroundColor: 'rgba(0,0,0,0.8)' }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setReassignModal(null); }}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl shadow-2xl relative overflow-hidden"
+            style={{ backgroundColor: tokens.cardBgSolid, border: `1px solid ${tokens.border}` }}
+          >
+            {/* Header */}
+            <div className="p-5 pb-4" style={{ borderBottom: `1px solid ${tokens.border}cc` }}>
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2">
+                  <div
+                    className="p-1.5 rounded-lg"
+                    style={{ backgroundColor: `${tokens.statusWarning}15`, border: `1px solid ${tokens.statusWarning}30` }}
+                  >
+                    <ArrowLeftRight className="w-4 h-4" style={{ color: tokens.statusWarning }} />
+                  </div>
+                  <h3 className="text-sm font-bold" style={{ color: tokens.textPrimary }}>Reassign Ticket</h3>
+                </div>
+                <button
+                  onClick={() => setReassignModal(null)}
+                  className="p-1.5 rounded-lg transition-colors"
+                  style={{ color: tokens.textTertiary }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = tokens.textPrimary; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = tokens.textTertiary; }}
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                <span className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded" style={{ backgroundColor: `${tokens.accentPrimary}15`, color: tokens.accentPrimary }}>
+                  {reassignModal.ticketNumber}
+                </span>
+                <span className="text-[10px] truncate" style={{ color: tokens.textSecondary }}>{reassignModal.ticketTitle}</span>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-[10px] font-mono uppercase tracking-wider mb-1.5" style={{ color: tokens.textTertiary }}>Assign To Agent</label>
+                <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                  {agentList.map(agent => {
+                    const isSelected = reassignAgent === agent.id;
+                    const specs = agent.specialization
+                      ? Array.isArray(agent.specialization) ? agent.specialization : [agent.specialization]
+                      : [];
+                    return (
+                      <button
+                        key={agent.id}
+                        type="button"
+                        onClick={() => setReassignAgent(agent.id)}
+                        className="w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all cursor-pointer border"
+                        style={{
+                          backgroundColor: isSelected ? `${tokens.accentPrimary}15` : tokens.inputBg,
+                          border: `1px solid ${isSelected ? tokens.accentPrimary : tokens.border}`,
+                          boxShadow: isSelected ? `0 0 0 1px ${tokens.accentPrimary}40` : undefined,
+                        }}
+                        onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.borderColor = tokens.borderStrong; }}
+                        onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.borderColor = tokens.border; }}
+                      >
+                        <div
+                          className="w-9 h-9 rounded-lg flex items-center justify-center text-[10px] font-bold shrink-0"
+                          style={{
+                            backgroundColor: isSelected ? tokens.accentPrimary : tokens.cardBgSolid,
+                            color: isSelected ? 'var(--accent-primary-contrast, #fff)' : tokens.textSecondary,
+                            border: `1px solid ${isSelected ? tokens.accentPrimary : tokens.border}`,
+                          }}
+                        >
+                          {agent.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-semibold truncate" style={{ color: tokens.textPrimary }}>{agent.name}</span>
+                            {!agent.available && (
+                              <span className="text-[8px] font-mono uppercase px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 shrink-0">
+                                Unavailable
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                            {agent.department && (
+                              <span className="text-[9px]" style={{ color: tokens.textTertiary }}>{agent.department}</span>
+                            )}
+                            {specs.length > 0 && (
+                              <span
+                                className="text-[8px] font-mono px-1.5 py-0.5 rounded-full"
+                                style={{ backgroundColor: `${tokens.accentPrimary}15`, color: tokens.accentPrimary, border: `1px solid ${tokens.accentPrimary}33` }}
+                              >
+                                {specs.slice(0, 2).join(', ')}{specs.length > 2 ? ` +${specs.length - 2}` : ''}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="text-xs font-bold" style={{ color: tokens.textSecondary }}>{agent.activeTicketCount}</div>
+                          <div className="text-[8px] font-mono uppercase" style={{ color: tokens.textTertiary }}>active</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                  {agentList.length === 0 && (
+                    <div className="p-4 rounded-xl text-center border border-dashed" style={{ borderColor: tokens.border }}>
+                      <p className="text-[11px]" style={{ color: tokens.textTertiary }}>No other agents available.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div>
+                <label className="block text-[10px] font-mono uppercase tracking-wider mb-1.5" style={{ color: tokens.textTertiary }}>Reason (Optional)</label>
+                <textarea
+                  value={reassignReason}
+                  onChange={(e) => setReassignReason(e.target.value)}
+                  rows={3}
+                  placeholder="Explain why this ticket is being reassigned..."
+                  className="w-full rounded-lg px-3 py-2.5 text-xs outline-none resize-none transition-all"
+                  style={{ backgroundColor: tokens.inputBg, border: `1px solid ${tokens.border}`, color: tokens.textPrimary }}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = tokens.accentPrimary; }}
+                  onBlur={(e) => { e.currentTarget.style.borderColor = tokens.border; }}
+                />
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-5 pt-3 flex items-center justify-end gap-2" style={{ borderTop: `1px solid ${tokens.border}cc` }}>
+              <button
+                onClick={() => setReassignModal(null)}
+                className="px-4 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer"
+                style={{ backgroundColor: tokens.cardBgSolid, border: `1px solid ${tokens.border}`, color: tokens.textSecondary }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = tokens.textPrimary; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = tokens.textSecondary; }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleReassign}
+                disabled={!reassignAgent || reassignLoading}
+                className="px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{ backgroundColor: tokens.accentPrimary, color: 'var(--accent-primary-contrast)' }}
+                onMouseEnter={(e) => { if (!e.currentTarget.disabled) e.currentTarget.style.opacity = '0.9'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
+              >
+                {reassignLoading ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Send className="w-3.5 h-3.5" />
+                )}
+                <span>{reassignLoading ? 'Reassigning...' : 'Confirm Reassignment'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../shared/AppContext';
 import { useTheme } from '../shared/ThemeContext';
-import { Sparkles, ShieldAlert, KeyRound, ArrowRight, UserCircle2, CheckCircle2 } from 'lucide-react';
+import { Sparkles, ShieldAlert, KeyRound, ArrowRight, UserCircle2, CheckCircle2, X } from 'lucide-react';
 import { AnimatedHeroBackground } from '../components/AnimatedHeroBackground';
 
 export const Register: React.FC = () => {
@@ -13,9 +13,24 @@ export const Register: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<'Employee' | 'Agent'>('Employee');
+  const [department, setDepartment] = useState('');
+  const [specializations, setSpecializations] = useState<string[]>([]);
+  const [specInput, setSpecInput] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+
+  const addSpecialization = () => {
+    const val = specInput.trim();
+    if (val && !specializations.includes(val)) {
+      setSpecializations([...specializations, val]);
+    }
+    setSpecInput('');
+  };
+
+  const removeSpecialization = (spec: string) => {
+    setSpecializations(specializations.filter(s => s !== spec));
+  };
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,7 +44,14 @@ export const Register: React.FC = () => {
     setSuccess('');
     
     try {
-      const response = await register(fullName, email, password, role);
+      const response = await register(
+        fullName,
+        email,
+        password,
+        role,
+        role === 'Agent' ? department.trim() || undefined : undefined,
+        role === 'Agent' && specializations.length ? specializations : undefined
+      );
       const acknowledgement = response.message || 'Your account request was delivered to the administrator and is now queued for approval. You can sign in after approval.';
       setSuccess(`${acknowledgement} Redirecting to login...`);
       setTimeout(() => {
@@ -138,7 +160,15 @@ export const Register: React.FC = () => {
                 id="register-role"
                 name="role"
                 value={role}
-                onChange={(e) => setRole(e.target.value as 'Employee' | 'Agent')}
+                onChange={(e) => {
+                  const newRole = e.target.value as 'Employee' | 'Agent';
+                  setRole(newRole);
+                  if (newRole === 'Employee') {
+                    setDepartment('');
+                    setSpecializations([]);
+                    setSpecInput('');
+                  }
+                }}
                 disabled={isLoading}
                 className="w-full rounded-lg px-3 py-2.5 text-xs outline-none transition-all disabled:opacity-50 appearance-none cursor-pointer"
                 style={{ backgroundColor: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
@@ -151,6 +181,72 @@ export const Register: React.FC = () => {
               <ArrowRight className="absolute right-3 top-3 w-3.5 h-3.5 rotate-90 pointer-events-none" style={{ color: 'var(--text-tertiary)' }} />
             </div>
           </div>
+
+          {role === 'Agent' && (
+            <>
+              <div>
+                <label className="block text-[11px] font-mono uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Department (optional)</label>
+                <input
+                  id="register-department"
+                  name="department"
+                  type="text"
+                  placeholder="e.g. Information Technology"
+                  value={department}
+                  onChange={(e) => setDepartment(e.target.value)}
+                  disabled={isLoading}
+                  className="w-full rounded-lg px-3 py-2.5 text-xs outline-none transition-all disabled:opacity-50"
+                  style={{ backgroundColor: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent-primary)'; }}
+                  onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; }}
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-mono uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Specialization (optional)</label>
+                <div className="flex gap-2">
+                  <input
+                    id="register-specialization"
+                    name="specialization"
+                    type="text"
+                    placeholder="e.g. Network, Hardware"
+                    value={specInput}
+                    onChange={(e) => setSpecInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addSpecialization(); } }}
+                    disabled={isLoading}
+                    className="w-full rounded-lg px-3 py-2.5 text-xs outline-none transition-all disabled:opacity-50"
+                    style={{ backgroundColor: 'var(--input-bg)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                    onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent-primary)'; }}
+                    onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; }}
+                  />
+                  <button
+                    type="button"
+                    onClick={addSpecialization}
+                    disabled={isLoading || !specInput.trim()}
+                    className="px-3 rounded-lg text-xs font-medium transition-all disabled:opacity-40"
+                    style={{ backgroundColor: `${tokens.accentPrimary}1A`, border: `1px solid ${tokens.accentPrimary}33`, color: 'var(--accent-primary)' }}
+                  >
+                    Add
+                  </button>
+                </div>
+                {specializations.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {specializations.map(spec => (
+                      <span
+                        key={spec}
+                        className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded-full font-medium"
+                        style={{ backgroundColor: `${tokens.accentPrimary}1A`, border: `1px solid ${tokens.accentPrimary}33`, color: 'var(--accent-primary)' }}
+                      >
+                        {spec}
+                        <button type="button" onClick={() => removeSpecialization(spec)} className="hover:opacity-70">
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
 
           <button 
             type="submit"
