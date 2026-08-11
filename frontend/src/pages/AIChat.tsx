@@ -50,12 +50,20 @@ export const AIChat: React.FC = () => {
   const [guidedState, setGuidedState] = useState<string | null>(null);
 
   const contentRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
 
   useEffect(() => {
-    if (contentRef.current) {
+    if (contentRef.current && isAtBottomRef.current) {
       contentRef.current.scrollTop = contentRef.current.scrollHeight;
     }
   }, [messages, isTyping, typingText]);
+
+  const handleConversationScroll = () => {
+    const content = contentRef.current;
+    if (!content) return;
+
+    isAtBottomRef.current = content.scrollHeight - content.scrollTop - content.clientHeight < 24;
+  };
 
   useEffect(() => {
     const welcomeMsg: ChatMessage = {
@@ -496,6 +504,7 @@ export const AIChat: React.FC = () => {
         <div 
           ref={contentRef}
           className="flex-1 overflow-y-auto p-6 space-y-8"
+          onScroll={handleConversationScroll}
         >
           {messages.map((msg, idx) => {
             const isBot = msg.sender === 'assistant';
