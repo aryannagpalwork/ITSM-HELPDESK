@@ -10,13 +10,50 @@ SLA_TARGET_HOURS: dict[str, float] = {
     "Medium": 24.0,
     "Low": 72.0,
 }
-ACTIVE_STATUSES = {"Open", "In Progress", "Waiting for User Response", "Awaiting User Response"}
+FIRST_RESPONSE_MINUTES: dict[str, float] = {
+    "Critical": 15.0,
+    "High": 30.0,
+    "Medium": 120.0,
+    "Low": 240.0,
+}
+NEAR_BREACH_PERCENT = 80.0
+ACTIVE_STATUSES = {"Open", "In Progress", "Waiting for User Response"}
 TERMINAL_STATUSES = {"Resolved", "Closed"}
 
 
 def target_hours(priority: str | None) -> float:
     normalized = (priority or "Medium").replace("_", " ").title()
     return SLA_TARGET_HOURS.get(normalized, SLA_TARGET_HOURS["Medium"])
+
+
+def first_response_minutes(priority: str | None) -> float:
+    normalized = (priority or "Medium").replace("_", " ").title()
+    return FIRST_RESPONSE_MINUTES.get(normalized, FIRST_RESPONSE_MINUTES["Medium"])
+
+
+def near_breach_threshold() -> float:
+    return NEAR_BREACH_PERCENT
+
+
+def apply_sla_config(config: dict[str, Any]) -> None:
+    """Update module-level constants from a DB-loaded config dict."""
+    global SLA_TARGET_HOURS, FIRST_RESPONSE_MINUTES, NEAR_BREACH_PERCENT
+    for key in ("critical", "high", "medium", "low"):
+        if key in config and isinstance(config[key], dict):
+            title_key = key.title()
+            if "sla_target_hours" in config[key]:
+                SLA_TARGET_HOURS[title_key] = float(config[key]["sla_target_hours"])
+            if "first_response_minutes" in config[key]:
+                FIRST_RESPONSE_MINUTES[title_key] = float(config[key]["first_response_minutes"])
+    if "near_breach_percent" in config:
+        NEAR_BREACH_PERCENT = float(config["near_breach_percent"])
+
+
+async def load_sla_config_from_db(db) -> None:
+    """Load SLA config from app_settings collection and apply to module constants."""
+    doc = await db.app_settings.find_one({"_id": "sla_config"})
+    if doc:
+        apply_sla_config({k: v for k, v in doc.items() if k != "_id"})
 
 
 def _hours_between(start: datetime, end: datetime) -> float:
@@ -52,13 +89,15 @@ def calculate_sla(
     breached = elapsed > hours
     compliant = elapsed <= hours if status in TERMINAL_STATUSES else None
 
+    threshold = near_breach_threshold() / 100.0
+
     if status == "Closed":
         sla_status = "Completed"
     elif status == "Resolved":
         sla_status = "Breached" if breached else "Within SLA"
     elif breached:
         sla_status = "Breached"
-    elif elapsed >= hours * 0.8:
+    elif elapsed >= hours * threshold:
         sla_status = "Near Breach"
     else:
         sla_status = "Active"

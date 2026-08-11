@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.api import admin, alerts, auth, chat, documents, health, kpi, leaves, notifications, tickets
+from app.api import admin, alerts, auth, chat, documents, health, kpi, leaves, notifications, sla_config, tickets
 
 api_router = APIRouter()
 api_router.include_router(health.router)
@@ -15,3 +15,4 @@ api_router.include_router(admin.router)
 api_router.include_router(kpi.router)
 api_router.include_router(alerts.router)
 api_router.include_router(notifications.router)
+api_router.include_router(sla_config.router)

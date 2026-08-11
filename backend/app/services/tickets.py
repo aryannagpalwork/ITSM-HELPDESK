@@ -23,7 +23,7 @@ from app.schemas.ticket import (
 from app.schemas.audit_log import AuditLogRead
 from app.services.sla import calculate_sla, snapshot_for_ticket
 
-ACTIVE_TICKET_STATUSES = {"Open", "In Progress", "Waiting for User Response", "Awaiting User Response"}
+ACTIVE_TICKET_STATUSES = {"Open", "In Progress", "Waiting for User Response"}
 DEFAULT_AGENT_CAPACITY = 10
 
 # Legacy/imported records may use workflow labels that are not part of the
@@ -412,7 +412,7 @@ async def add_comment(
     # and notify the assigned agent
     current_user = await db.users.find_one({"_id": current_user_id})
     is_employee = current_user and current_user.get("role") in ("end_user", "employee")
-    if is_employee and not is_internal and ticket.get("status") == "awaiting_user_response":
+    if is_employee and not is_internal and ticket.get("status") == "Waiting for User Response":
         await db.tickets.update_one(
             {"_id": ticket_id},
             {"$set": {"status": "in_progress", "updated_at": now}},
@@ -1143,14 +1143,14 @@ async def get_agent_metrics(db: AsyncIOMotorDatabase, agent_id: str) -> dict:
     total_assigned = len(assigned_tickets)
     open_count = len([t for t in assigned_tickets if t["status"] == "Open"])
     in_progress_count = len([t for t in assigned_tickets if t["status"] == "In Progress"])
-    waiting_count = len([t for t in assigned_tickets if t["status"] == "Awaiting User Response"])
+    waiting_count = len([t for t in assigned_tickets if t["status"] == "Waiting for User Response"])
     resolved_today = len([
         t for t in assigned_tickets
         if t["status"] == "Resolved" and t.get("updated_at", t["created_at"]) >= today_start
     ])
     overdue_count = len([
         t for t in assigned_tickets
-        if t["status"] in ("Open", "In Progress", "Awaiting User Response") and t.get("ai_analysis_estimated_sla")
+        if t["status"] in ("Open", "In Progress", "Waiting for User Response") and t.get("ai_analysis_estimated_sla")
     ])
     
     # Performance metrics
@@ -1208,7 +1208,7 @@ async def get_agent_metrics(db: AsyncIOMotorDatabase, agent_id: str) -> dict:
     # Active SLA breaches
     active_sla_breaches = len([
         t for t in assigned_tickets
-        if t["status"] in ("Open", "In Progress", "Awaiting User Response") and t.get("ai_analysis_estimated_sla")
+        if t["status"] in ("Open", "In Progress", "Waiting for User Response") and t.get("ai_analysis_estimated_sla")
     ])
     
     return {

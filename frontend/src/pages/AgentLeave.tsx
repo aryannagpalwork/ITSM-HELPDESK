@@ -10,6 +10,15 @@ const STATUS_STYLES: Record<LeaveRequest['status'], string> = {
   rejected: 'bg-rose-500/10 text-rose-400 border border-rose-500/20',
 };
 
+/** Date inputs use calendar dates, so derive today in the user's local time. */
+const getTodayDateInputValue = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export const AgentLeave: React.FC = () => {
   const { currentUser } = useApp();
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
@@ -21,6 +30,7 @@ export const AgentLeave: React.FC = () => {
     endDate: '',
     reason: '',
   });
+  const today = getTodayDateInputValue();
 
   const loadLeaveRequests = useCallback(async () => {
     try {
@@ -46,6 +56,10 @@ export const AgentLeave: React.FC = () => {
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (form.startDate < today || form.endDate < today) {
+      setError('Start Date and End Date must be today or a future date.');
+      return;
+    }
     try {
       setSubmitting(true);
       setError(null);
@@ -117,6 +131,7 @@ export const AgentLeave: React.FC = () => {
               <input
                 type="date"
                 required
+                min={today}
                 value={form.startDate}
                 onChange={(event) => setForm(prev => ({ ...prev, startDate: event.target.value }))}
                 className="w-full input-token rounded-lg px-3 py-2.5 text-xs outline-none"
@@ -128,6 +143,7 @@ export const AgentLeave: React.FC = () => {
               <input
                 type="date"
                 required
+                min={form.startDate && form.startDate > today ? form.startDate : today}
                 value={form.endDate}
                 onChange={(event) => setForm(prev => ({ ...prev, endDate: event.target.value }))}
                 className="w-full input-token rounded-lg px-3 py-2.5 text-xs outline-none"

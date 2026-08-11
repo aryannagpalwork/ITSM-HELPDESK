@@ -1497,3 +1497,32 @@ export const markAllNotificationsRead = async (): Promise<void> => {
     throw new Error(errorMsg);
   }
 };
+
+export interface PrioritySLAConfig {
+  sla_target_hours: number;
+  first_response_minutes: number;
+}
+
+export interface SLAConfig {
+  critical: PrioritySLAConfig;
+  high: PrioritySLAConfig;
+  medium: PrioritySLAConfig;
+  low: PrioritySLAConfig;
+  near_breach_percent: number;
+}
+
+export const getSLAConfig = async (): Promise<SLAConfig> => {
+  const response = await apiFetch(`${API_BASE_URL}/sla-config`);
+  if (!response.ok) throw new Error('Failed to load SLA configuration');
+  return response.json();
+};
+
+export const updateSLAConfig = async (config: Partial<SLAConfig>): Promise<SLAConfig> => {
+  const response = await apiFetch(`${API_BASE_URL}/sla-config`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+  if (!response.ok) throw new Error('Failed to update SLA configuration');
+  return response.json();
+};

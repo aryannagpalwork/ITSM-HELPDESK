@@ -255,6 +255,7 @@ export interface EmployeeKPIs {
   mttrHours: number;
   fcrRate: number;
   avgFirstResponseHours: number;
+  firstResponseSlaCompliance: number;
   reopenedTickets: number;
   aiCopilot: AICopilotEmployeeKPIs;
 }
@@ -331,6 +332,7 @@ export interface AgentKPIs {
   agentFcrRate: number;
   userSatisfaction: number;
   avgFirstResponseHours: number;
+  firstResponseSlaCompliance: number;
   resolutionRate: number;
   slaCompliance: number;
   reopenRate: number;
@@ -357,6 +359,7 @@ export interface AdminKPIs {
   activeSlaTickets: number;
   nearBreachTickets: number;
   criticalSlaBreaches: number;
+  firstResponseSlaCompliance: number;
   ticketBacklog: number;
   aiResolutionRate: number;
   aiQueries: number;

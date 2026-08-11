@@ -15,7 +15,7 @@ from app.schemas.kpi import (
     AnalyticsMetric,
     SLAAnalytics,
 )
-from app.services.sla import SLA_TARGET_HOURS, snapshot_for_ticket
+from app.services.sla import SLA_TARGET_HOURS, snapshot_for_ticket, first_response_minutes
 
 
 def _round1(value: float) -> float:
@@ -346,7 +346,7 @@ async def compute_employee_kpis(
     ticket_ids = [t["_id"] for t in tickets]
 
     total = len(tickets)
-    open_tickets = [t for t in tickets if t["status"] in ("Open", "In Progress", "Awaiting User Response")]
+    open_tickets = [t for t in tickets if t["status"] in ("Open", "In Progress", "Waiting for User Response")]
     resolved_closed = [t for t in tickets if t["status"] in ("Resolved", "Closed")]
     resolved_count = len(resolved_closed)
 
@@ -373,14 +373,23 @@ async def compute_employee_kpis(
 
     fr_total = 0.0
     fr_n = 0
+    fr_sla_met = 0
+    fr_sla_total = 0
     for t in tickets:
         tid = t["_id"]
         created = t.get("created_at")
         first_resp = first_resp_map.get(tid)
         if isinstance(created, datetime) and first_resp:
-            fr_total += _hours_between(created, first_resp)
+            elapsed_hours = _hours_between(created, first_resp)
+            fr_total += elapsed_hours
             fr_n += 1
+            priority = t.get("priority", "Medium")
+            target_min = first_response_minutes(priority)
+            fr_sla_total += 1
+            if elapsed_hours <= target_min / 60.0:
+                fr_sla_met += 1
     avg_first_response = _round1(fr_total / fr_n) if fr_n else 0.0
+    fr_sla_compliance = _pct(fr_sla_met, fr_sla_total)
 
     reopened = sum(1 for c in reopen_counts.values() if c > 0)
 
@@ -401,6 +410,7 @@ async def compute_employee_kpis(
         mttrHours=mttr,
         fcrRate=fcr,
         avgFirstResponseHours=avg_first_response,
+        firstResponseSlaCompliance=fr_sla_compliance,
         reopenedTickets=reopened,
         aiCopilot=ai,
     )
@@ -458,7 +468,7 @@ async def compute_agent_kpis(
                 resolution_hours = float(sla.get("resolution_duration_hours") or _hours_between(created_dt, updated_dt))
                 mttr_total += resolution_hours
                 mttr_n += 1
-        elif t["status"] in ("Open", "In Progress", "Awaiting User Response"):
+        elif t["status"] in ("Open", "In Progress", "Waiting for User Response"):
             if sla.get("sla_breached"):
                 overdue += 1
 
@@ -475,14 +485,23 @@ async def compute_agent_kpis(
 
     fr_total = 0.0
     fr_n = 0
+    fr_sla_met = 0
+    fr_sla_total = 0
     for t in tickets:
         tid = t["_id"]
         created = t.get("created_at")
         first_resp = first_resp_map.get(tid)
         if isinstance(created, datetime) and first_resp:
-            fr_total += _hours_between(created, first_resp)
+            elapsed_hours = _hours_between(created, first_resp)
+            fr_total += elapsed_hours
             fr_n += 1
+            priority = t.get("priority", "Medium")
+            target_min = first_response_minutes(priority)
+            fr_sla_total += 1
+            if elapsed_hours <= target_min / 60.0:
+                fr_sla_met += 1
     avg_first_response = _round1(fr_total / fr_n) if fr_n else 0.0
+    fr_sla_compliance = _pct(fr_sla_met, fr_sla_total)
 
     resolution_rate = _pct(resolved_count, assigned)
     sla_compliance_pct = _pct(sla_compliant, sla_total) if sla_total else 100.0
@@ -511,6 +530,7 @@ async def compute_agent_kpis(
         agentFcrRate=agent_fcr,
         userSatisfaction=user_satisfaction,
         avgFirstResponseHours=avg_first_response,
+        firstResponseSlaCompliance=fr_sla_compliance,
         resolutionRate=resolution_rate,
         slaCompliance=sla_compliance_pct,
         reopenRate=reopen_rate,
@@ -531,7 +551,7 @@ async def compute_admin_kpis(db: AsyncIOMotorDatabase) -> AdminKPIs:
     tickets = await db.tickets.find({}).to_list(length=None)
     ticket_ids = [t["_id"] for t in tickets]
 
-    backlog = len([t for t in tickets if t["status"] in ("Open", "In Progress", "Awaiting User Response")])
+    backlog = len([t for t in tickets if t["status"] in ("Open", "In Progress", "Waiting for User Response")])
 
     reopen_counts = await _get_ticket_reopen_counts(db, ticket_ids)
     escalation_counts = await _get_ticket_escalation_counts(db, ticket_ids)
@@ -589,6 +609,22 @@ async def compute_admin_kpis(db: AsyncIOMotorDatabase) -> AdminKPIs:
     sla_compliance_pct = _pct(sla_compliant, sla_total) if sla_total else 100.0
     sla_breaches = max(0, sla_total - sla_compliant)
 
+    # First-response SLA compliance (org-wide)
+    fr_sla_met = 0
+    fr_sla_total = 0
+    for t in tickets:
+        tid = t["_id"]
+        created = _coerce_datetime(t.get("created_at"))
+        first_resp = first_resp_map.get(tid)
+        if isinstance(created, datetime) and first_resp:
+            elapsed_hours = _hours_between(created, first_resp)
+            priority = t.get("priority", "Medium")
+            target_min = first_response_minutes(priority)
+            fr_sla_total += 1
+            if elapsed_hours <= target_min / 60.0:
+                fr_sla_met += 1
+    fr_sla_compliance = _pct(fr_sla_met, fr_sla_total)
+
     conversations = await _get_ai_conversation_rows(db)
     if conversations:
         ai_queries_count = len(conversations)
@@ -641,6 +677,7 @@ async def compute_admin_kpis(db: AsyncIOMotorDatabase) -> AdminKPIs:
         activeSlaTickets=active_sla_tickets,
         nearBreachTickets=near_breach_tickets,
         criticalSlaBreaches=critical_sla_breaches,
+        firstResponseSlaCompliance=fr_sla_compliance,
         ticketBacklog=backlog,
         aiResolutionRate=ai_resolution_rate,
         aiQueries=ai_queries_count,
@@ -841,7 +878,7 @@ async def get_admin_monthly_analytics(
             "totalCreated": {"$sum": 1},
             "open": {"$sum": {"$cond": [{"$eq": ["$status", "Open"]}, 1, 0]}},
             "inProgress": {"$sum": {"$cond": [{"$eq": ["$status", "In Progress"]}, 1, 0]}},
-            "awaitingUserResponse": {"$sum": {"$cond": [{"$eq": ["$status", "Awaiting User Response"]}, 1, 0]}},
+            "awaitingUserResponse": {"$sum": {"$cond": [{"$eq": ["$status", "Waiting for User Response"]}, 1, 0]}},
             "resolved": {"$sum": {"$cond": [{"$eq": ["$status", "Resolved"]}, 1, 0]}},
             "closed": {"$sum": {"$cond": [{"$eq": ["$status", "Closed"]}, 1, 0]}},
             "aiResolved": {"$sum": {"$cond": [
