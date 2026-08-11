@@ -268,6 +268,37 @@ def _is_ai_resolved_ticket(ticket: dict) -> bool:
     )
 
 
+def _ticket_resolution_hours(ticket: dict) -> float | None:
+    created = _coerce_datetime(ticket.get("created_at"))
+    updated = _coerce_datetime(ticket.get("updated_at"))
+    if not created or not updated:
+        return None
+    return float(_hours_between(created, updated))
+
+
+def _ticket_mttr_breakdown(tickets: list[dict]) -> tuple[float, float]:
+    agent_total = 0.0
+    agent_count = 0
+    ai_total = 0.0
+    ai_count = 0
+    for ticket in tickets:
+        if ticket.get("status") not in ("Resolved", "Closed"):
+            continue
+        resolution_hours = _ticket_resolution_hours(ticket)
+        if resolution_hours is None:
+            continue
+        if _is_ai_resolved_ticket(ticket):
+            ai_total += resolution_hours
+            ai_count += 1
+        else:
+            agent_total += resolution_hours
+            agent_count += 1
+    return (
+        _round1(agent_total / agent_count) if agent_count else 0.0,
+        _round1(ai_total / ai_count) if ai_count else 0.0,
+    )
+
+
 def _ai_conversation_is_resolved(conversation: dict) -> bool:
     if conversation.get("resolved_by_ai") is True:
         return True
@@ -354,15 +385,7 @@ async def compute_employee_kpis(
     escalation_counts = await _get_ticket_escalation_counts(db, ticket_ids)
     first_resp_map = await _get_first_response_map(db, ticket_ids)
 
-    mttr_total = 0.0
-    mttr_n = 0
-    for t in resolved_closed:
-        created = t.get("created_at")
-        updated = t.get("updated_at")
-        if isinstance(created, datetime) and isinstance(updated, datetime):
-            mttr_total += _hours_between(created, updated)
-            mttr_n += 1
-    mttr = _round1(mttr_total / mttr_n) if mttr_n else 0.0
+    agent_mttr, ai_mttr = _ticket_mttr_breakdown(resolved_closed)
 
     fcr_n = 0
     for t in resolved_closed:
@@ -398,7 +421,7 @@ async def compute_employee_kpis(
         totalTickets=total,
         openTickets=len(open_tickets),
         resolvedTickets=resolved_count,
-        mttrHours=mttr,
+        mttrHours=agent_mttr,
         fcrRate=fcr,
         avgFirstResponseHours=avg_first_response,
         reopenedTickets=reopened,
@@ -437,8 +460,6 @@ async def compute_agent_kpis(
     overdue = 0
     sla_compliant = 0
     sla_total = 0
-    mttr_total = 0.0
-    mttr_n = 0
     resolved_closed = [t for t in tickets if t["status"] in ("Resolved", "Closed")]
     resolved_count = len(resolved_closed)
 
@@ -451,6 +472,7 @@ async def compute_agent_kpis(
             sla_total += 1
             if not sla.get("sla_breached"):
                 sla_compliant += 1
+<<<<<<< Updated upstream
             updated = t.get("updated_at")
             created_dt = _coerce_datetime(created)
             updated_dt = _coerce_datetime(updated)
@@ -459,10 +481,13 @@ async def compute_agent_kpis(
                 mttr_total += resolution_hours
                 mttr_n += 1
         elif t["status"] in ("Open", "In Progress"):
+=======
+        elif t["status"] in ("Open", "In Progress", "Awaiting User Response"):
+>>>>>>> Stashed changes
             if sla.get("sla_breached"):
                 overdue += 1
 
-    mttr = _round1(mttr_total / mttr_n) if mttr_n else 0.0
+    agent_mttr, ai_mttr = _ticket_mttr_breakdown(resolved_closed)
 
     agent_fcr_n = 0
     for t in resolved_closed:
@@ -471,8 +496,6 @@ async def compute_agent_kpis(
         if _is_first_contact_resolution(t, comment_summary.get(tid, {}), resolver_kind or "") and resolver_kind == "agent":
             agent_fcr_n += 1
     agent_fcr = _pct(agent_fcr_n, resolved_count)
-    user_satisfaction = _pct(sum(1 for t in tickets if _is_ai_resolved_ticket(t)), len(tickets))
-
     fr_total = 0.0
     fr_n = 0
     for t in tickets:
@@ -507,9 +530,9 @@ async def compute_agent_kpis(
         resolvedTickets=resolved_count,
         resolvedToday=resolved_today,
         overdueTickets=overdue,
-        mttrHours=mttr,
+        agentMttrHours=agent_mttr,
+        aiMttrHours=ai_mttr,
         agentFcrRate=agent_fcr,
-        userSatisfaction=user_satisfaction,
         avgFirstResponseHours=avg_first_response,
         resolutionRate=resolution_rate,
         slaCompliance=sla_compliance_pct,
@@ -538,8 +561,6 @@ async def compute_admin_kpis(db: AsyncIOMotorDatabase) -> AdminKPIs:
     first_resp_map = await _get_first_response_map(db, ticket_ids)
     comment_summary = await _get_ticket_comment_summary(db, ticket_ids)
 
-    mttr_total = 0.0
-    mttr_n = 0
     sla_compliant = 0
     sla_total = 0
     active_sla_tickets = 0
@@ -558,12 +579,6 @@ async def compute_admin_kpis(db: AsyncIOMotorDatabase) -> AdminKPIs:
             critical_sla_breaches += 1
 
     for t in resolved_closed:
-        created = _coerce_datetime(t.get("created_at"))
-        updated = _coerce_datetime(t.get("updated_at"))
-        if created and updated:
-            resolution_hours = _hours_between(created, updated)
-            mttr_total += resolution_hours
-            mttr_n += 1
         # Count every terminal ticket in SLA compliance, including legacy
         # documents whose timestamps are stored as strings.
         sla = snapshot_for_ticket(t)
@@ -571,7 +586,7 @@ async def compute_admin_kpis(db: AsyncIOMotorDatabase) -> AdminKPIs:
         if not sla.get("sla_breached"):
             sla_compliant += 1
 
-    org_mttr = _round1(mttr_total / mttr_n) if mttr_n else 0.0
+    agent_mttr, ai_mttr = _ticket_mttr_breakdown(resolved_closed)
 
     agent_fcr_n = 0
     reopened_n = 0
@@ -583,7 +598,6 @@ async def compute_admin_kpis(db: AsyncIOMotorDatabase) -> AdminKPIs:
         if reopen_counts.get(tid, 0) > 0:
             reopened_n += 1
     org_agent_fcr = _pct(agent_fcr_n, resolved_count)
-    user_satisfaction = _pct(sum(1 for t in tickets if _is_ai_resolved_ticket(t)), len(tickets))
     reopen_rate_pct = _pct(reopened_n, resolved_count)
 
     sla_compliance_pct = _pct(sla_compliant, sla_total) if sla_total else 100.0
@@ -633,9 +647,9 @@ async def compute_admin_kpis(db: AsyncIOMotorDatabase) -> AdminKPIs:
         systemUsers=system_users,
         totalTickets=len(tickets),
         activeAgents=active_agents,
-        orgMttrHours=org_mttr,
+        agentMttrHours=agent_mttr,
+        aiMttrHours=ai_mttr,
         orgAgentFcrRate=org_agent_fcr,
-        userSatisfaction=user_satisfaction,
         slaCompliance=sla_compliance_pct,
         slaBreaches=sla_breaches,
         activeSlaTickets=active_sla_tickets,

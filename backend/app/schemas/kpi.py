@@ -91,9 +91,9 @@ class AgentKPIs(BaseModel):
     resolvedTickets: int = 0
     resolvedToday: int = 0
     overdueTickets: int = 0
-    mttrHours: float = 0.0
+    agentMttrHours: float = 0.0
+    aiMttrHours: float = 0.0
     agentFcrRate: float = 0.0
-    userSatisfaction: float = 0.0
     avgFirstResponseHours: float = 0.0
     resolutionRate: float = 0.0
     slaCompliance: float = 0.0
@@ -114,9 +114,9 @@ class AdminKPIs(BaseModel):
     systemUsers: int = 0
     totalTickets: int = 0
     activeAgents: int = 0
-    orgMttrHours: float = 0.0
+    agentMttrHours: float = 0.0
+    aiMttrHours: float = 0.0
     orgAgentFcrRate: float = 0.0
-    userSatisfaction: float = 0.0
     slaCompliance: float = 0.0
     slaBreaches: int = 0
     activeSlaTickets: int = 0

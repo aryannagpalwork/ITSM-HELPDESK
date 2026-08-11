@@ -265,7 +265,7 @@ export const AgentDashboard: React.FC = () => {
     reopenRate: 0,
   };
 
-  const m: AgentMetrics & { userSatisfaction: number | null; agentFcrRate: number | null } = {
+  const m: AgentMetrics & { agentFcrRate: number | null; agentMttrHours: number | null; aiMttrHours: number | null } = {
     assignedTickets: roleAgentKPIs?.assignedTickets ?? legacy.assignedTickets,
     openTickets: roleAgentKPIs?.openTickets ?? legacy.openTickets,
     inProgress: roleAgentKPIs?.inProgress ?? legacy.inProgress,
@@ -273,13 +273,14 @@ export const AgentDashboard: React.FC = () => {
     resolvedToday: roleAgentKPIs?.resolvedToday ?? legacy.resolvedToday,
     overdueTickets: roleAgentKPIs?.overdueTickets ?? legacy.overdueTickets,
     ticketsResolved: roleAgentKPIs?.resolvedTickets ?? legacy.ticketsResolved,
-    avgResolutionTimeHours: roleAgentKPIs?.mttrHours ?? legacy.avgResolutionTimeHours,
+    avgResolutionTimeHours: roleAgentKPIs?.agentMttrHours ?? legacy.avgResolutionTimeHours,
     firstResponseTime: roleAgentKPIs?.avgFirstResponseHours ?? legacy.firstResponseTime,
     slaCompliance: roleAgentKPIs?.slaCompliance ?? legacy.slaCompliance,
     resolutionRate: roleAgentKPIs?.resolutionRate ?? legacy.resolutionRate,
     reopenRate: roleAgentKPIs?.reopenRate ?? legacy.reopenRate,
     agentFcrRate: roleAgentKPIs?.agentFcrRate ?? null,
-    userSatisfaction: roleAgentKPIs?.userSatisfaction ?? null,
+    agentMttrHours: roleAgentKPIs?.agentMttrHours ?? null,
+    aiMttrHours: roleAgentKPIs?.aiMttrHours ?? null,
     avgResolutionTime: legacy.avgResolutionTime,
     activeSlaBreaches: legacy.activeSlaBreaches,
     agentWorkload: legacy.agentWorkload,
@@ -452,8 +453,8 @@ export const AgentDashboard: React.FC = () => {
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           <KpiCard tokens={tokens} label="Assigned" value={m.assignedTickets} icon={<Inbox className="w-3 h-3" style={{ color: tokens.accentPrimary }} />} color="" subtitle={metricsAvailable ? 'Open assigned ticket queue' : 'Loading...'} isActive={cardFilter?.label === 'Assigned'} onClick={() => navigate('/agent/tickets')} onOpen={() => navigate('/agent/tickets')} openLabel="Open full ticket queue" />
           <KpiCard tokens={tokens} label="Resolved Today" value={m.resolvedToday} icon={<CheckCircle2 className="w-3 h-3" style={{ color: tokens.statusInfo }} />} color="" subtitle={metricsAvailable ? 'Open resolved tickets' : 'Loading...'} isActive={cardFilter?.label === 'Resolved Today'} onClick={() => navigate('/agent/tickets?status=resolved')} onOpen={() => navigate('/agent/tickets?status=resolved')} openLabel="Open resolved tickets" />
-          <KpiCard tokens={tokens} label="Mean Time To Resolution" value={metricsAvailable ? `${m.avgResolutionTimeHours}h` : 'N/A'} icon={<Timer className="w-3 h-3" style={{ color: tokens.statusInfo }} />} color="" subtitle="Open resolved tickets" isActive={cardFilter?.label === 'Mean Time To Resolution'} onClick={() => navigate('/agent/tickets?status=resolved')} onOpen={() => navigate('/agent/tickets?status=resolved')} openLabel="Open resolved tickets" />
-          <KpiCard tokens={tokens} label="User Satisfaction" value={richKpisAvailable && m.userSatisfaction !== null ? `${m.userSatisfaction}%` : '—'} icon={<Sparkles className="w-3 h-3" style={{ color: tokens.statusInfo }} />} color="" subtitle="Tickets resolved by AI" accent={richKpisAvailable} isActive={cardFilter?.label === 'User Satisfaction'} onClick={() => navigate('/agent/tickets?status=resolved')} onOpen={() => navigate('/agent/tickets?status=resolved')} openLabel="Open resolved tickets" />
+          <KpiCard tokens={tokens} label="Agent MTTR" value={richKpisAvailable && m.agentMttrHours !== null ? `${m.agentMttrHours}h` : '—'} icon={<Timer className="w-3 h-3" style={{ color: tokens.statusInfo }} />} color="" subtitle="Average resolution time for agent-resolved tickets" accent={richKpisAvailable} isActive={cardFilter?.label === 'Agent MTTR'} onClick={() => navigate('/agent/tickets?status=resolved')} onOpen={() => navigate('/agent/tickets?status=resolved')} openLabel="Open resolved tickets" />
+          <KpiCard tokens={tokens} label="AI MTTR" value={richKpisAvailable && m.aiMttrHours !== null ? `${m.aiMttrHours}h` : '—'} icon={<Sparkles className="w-3 h-3" style={{ color: tokens.statusInfo }} />} color="" subtitle="Average resolution time for AI-resolved tickets" accent={richKpisAvailable} isActive={cardFilter?.label === 'AI MTTR'} onClick={() => navigate('/agent/tickets?status=resolved')} onOpen={() => navigate('/agent/tickets?status=resolved')} openLabel="Open resolved tickets" />
           <KpiCard tokens={tokens} label="Agent First Contact Resolution" value={richKpisAvailable && m.agentFcrRate !== null ? `${m.agentFcrRate}%` : '—'} icon={<UserCircle2 className="w-3 h-3" style={{ color: tokens.accentPrimary }} />} color="" subtitle="First-contact agent resolutions" accent={richKpisAvailable} isActive={cardFilter?.label === 'Agent First Contact Resolution'} onClick={() => navigate('/agent/tickets?status=resolved')} onOpen={() => navigate('/agent/tickets?status=resolved')} openLabel="Open resolved tickets" />
         </div>
       </div>
