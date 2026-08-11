@@ -123,9 +123,9 @@ export const AdminDashboard: React.FC = () => {
   }
 
   // Derived merged values (prefer backend adminKPIs where available).
-  const orgMTTR = adminKPIs?.orgMttrHours ?? null;
+  const agentMTTR = adminKPIs?.agentMttrHours ?? null;
+  const aiMTTR = adminKPIs?.aiMttrHours ?? null;
   const orgAgentFCR = adminKPIs?.orgAgentFcrRate ?? null;
-  const userSatisfaction = adminKPIs?.userSatisfaction ?? null;
   const richKpisAvailable = adminKPIs !== null && isAdmin;
   const kpiLoading = isAdmin && kpisLoading && !adminKPIs;
 
@@ -152,7 +152,7 @@ export const AdminDashboard: React.FC = () => {
           </span>
           <h1 className="text-2xl font-bold text-primary tracking-tight">System Administration</h1>
           <p className="text-xs text-secondary">
-            Monitor organizational resolution quality, satisfaction, and the live incident queue.
+            Monitor organizational resolution quality and the live incident queue.
           </p>
         </div>
 
@@ -268,24 +268,24 @@ export const AdminDashboard: React.FC = () => {
         )}
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
           <KpiCard
-            label="Mean Time To Resolve"
+            label="Agent MTTR"
             icon={<Timer className="w-3.5 h-3.5 text-sky-400" />}
-            value={orgMTTR !== null ? `${orgMTTR} hr` : '—'}
+            value={agentMTTR !== null ? `${agentMTTR} hr` : '—'}
             valueClass="text-sky-400"
-            sublabel={richKpisAvailable ? 'Org-wide average resolution time' : 'Calculating…'}
+            sublabel={richKpisAvailable ? 'Average resolution time for agent-resolved tickets' : 'Calculating…'}
             loading={kpiLoading}
-            isActive={filterActive('Mean Time To Resolve')}
+            isActive={filterActive('Agent MTTR')}
             onClick={() => goToTickets('?status=resolved')}
             onOpen={() => goToTickets('?status=resolved')}
           />
           <KpiCard
-            label="User Satisfaction"
+            label="AI MTTR"
             icon={<Bot className="w-3.5 h-3.5 text-violet-400" />}
-            value={userSatisfaction !== null ? `${userSatisfaction}%` : '—'}
+            value={aiMTTR !== null ? `${aiMTTR} hr` : '—'}
             valueClass="text-violet-400"
-            sublabel={richKpisAvailable ? 'Tickets resolved by AI' : 'Pending data'}
+            sublabel={richKpisAvailable ? 'Average resolution time for AI-resolved tickets' : 'Pending data'}
             loading={kpiLoading}
-            isActive={filterActive('User Satisfaction')}
+            isActive={filterActive('AI MTTR')}
             onClick={() => goToTickets('?status=resolved')}
             onOpen={() => goToTickets('?status=resolved')}
           />

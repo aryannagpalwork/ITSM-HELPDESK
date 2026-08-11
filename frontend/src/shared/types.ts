@@ -328,9 +328,9 @@ export interface AgentKPIs {
   resolvedTickets: number;
   resolvedToday: number;
   overdueTickets: number;
-  mttrHours: number;
+  agentMttrHours: number;
+  aiMttrHours: number;
   agentFcrRate: number;
-  userSatisfaction: number;
   avgFirstResponseHours: number;
   firstResponseSlaCompliance: number;
   resolutionRate: number;
@@ -351,9 +351,9 @@ export interface AICopilotAdminKPIs {
 export interface AdminKPIs {
   systemUsers: number;
   activeAgents: number;
-  orgMttrHours: number;
+  agentMttrHours: number;
+  aiMttrHours: number;
   orgAgentFcrRate: number;
-  userSatisfaction: number;
   slaCompliance: number;
   slaBreaches: number;
   activeSlaTickets: number;
