@@ -271,7 +271,7 @@ export const AdminAlertManagement: React.FC = () => {
                 }`}
               >
                 <span>Manual Alerts</span>
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-zinc-800 text-zinc-300">
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-zinc-800 !text-white">
                   {manualAlertsCount}
                 </span>
               </button>
@@ -286,7 +286,7 @@ export const AdminAlertManagement: React.FC = () => {
                 }`}
               >
                 <span>Automatic Alerts</span>
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-zinc-800 text-zinc-300">
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-zinc-800 !text-white">
                   {autoAlertsCount}
                 </span>
               </button>
@@ -339,7 +339,7 @@ export const AdminAlertManagement: React.FC = () => {
                         {item.status}
                       </span>
                       {item.category && (
-                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300">
+                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 !text-white">
                           {item.category}
                         </span>
                       )}
