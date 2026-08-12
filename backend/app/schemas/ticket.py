@@ -62,6 +62,10 @@ class TicketCreate(BaseModel):
     created_by: str | None = None
     ai_summary: str | None = None
     resolution: str | None = None
+    resolved_by: str | None = None
+    resolution_source: str | None = None
+    ai_resolved: bool = False
+    ai_conversation_id: str | None = None
     # AI Analysis fields
     ai_analysis_category: str | None = None
     ai_analysis_priority: str | None = None

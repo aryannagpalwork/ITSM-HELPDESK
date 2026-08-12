@@ -38,6 +38,7 @@ from app.rag.prompt_builder import (
 )
 from app.rag.config import get_rag_settings
 from app.rag.retriever import RetrievedContext
+from bson import ObjectId
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +191,49 @@ def _is_explicit_resolution_reply(query: str) -> bool:
 def _is_explicit_negative_reply(query: str) -> bool:
     normalized = re.sub(r"[^a-z]", "", (query or "").lower())
     return normalized in {"no", "n", "nope", "notfixed", "stillbroken", "stillnotworking"}
+
+
+# Backwards-compatible helper wrappers used by unit tests and other modules.
+def _is_positive_response(query: str) -> bool:
+    """Return True for phrases that indicate the user confirms resolution."""
+    try:
+        if _is_explicit_resolution_reply(query):
+            return True
+    except Exception:
+        pass
+    return _classify_user_sentiment(query) == "positive"
+
+
+def _is_negative_response(query: str) -> bool:
+    """Return True for phrases that indicate the user reports failure or persistent issues."""
+    try:
+        if _is_explicit_negative_reply(query):
+            return True
+    except Exception:
+        pass
+    # Treat phrases containing 'persist' as negative (e.g., "issue persists").
+    try:
+        normalized = re.sub(r"[^a-z0-9\s']", " ", (query or "").lower()).strip()
+        if "persist" in normalized or "persists" in normalized:
+            return True
+    except Exception:
+        pass
+    return _classify_user_sentiment(query) == "negative"
+
+
+def _should_offer_ticket(failure_count: int) -> bool:
+    """Offer ticket creation after the configured number of failed troubleshooting iterations."""
+    try:
+        return int(failure_count) >= DEFAULT_TROUBLESHOOTING_FAILURE_THRESHOLD
+    except Exception:
+        return False
+
+
+def _should_prompt_satisfaction(conversation_status: str) -> bool:
+    """Prompt the satisfaction card when the conversation status indicates resolution."""
+    if not conversation_status:
+        return False
+    return str(conversation_status).strip().lower() == "resolved"
 
 
 def _conversation_text(history: list[ChatMessage], latest: str) -> str:
@@ -551,6 +595,10 @@ async def _ensure_ai_resolved_ticket(
         "status": TicketStatus.resolved,
         "resolution": "Resolved by AI",
         "ai_summary": str(ticket_details.get("summary") or "Resolved by AI Copilot"),
+        "resolved_by": "AI",
+        "resolution_source": "AI",
+        "ai_resolved": True,
+        "ai_conversation_id": session_id,
     }
     logger.info("AI ticket creation payload prepared session_id=%s payload=%s", session_id, ai_payload_data)
     try:
@@ -560,10 +608,6 @@ async def _ensure_ai_resolved_ticket(
             ai_payload,
             reason="Resolved by AI",
             current_user=current_user,
-            resolved_by="AI",
-            resolution_source="AI",
-            ai_resolved=True,
-            ai_conversation_id=session_id,
         )
     except Exception:
         logger.exception("AI ticket creation failed session_id=%s payload=%s", session_id, ai_payload_data)
@@ -1428,6 +1472,71 @@ async def chat(
         guided_state=guided_state,
         ticket_id=None,
     )
+
+
+@router.get("/history/{session_id}")
+async def get_chat_history(
+    session_id: str,
+    db: DatabaseSession,
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    """Return persisted chat history for a session, ensuring the current
+    user owns the AI conversation. Returns messages in chronological order
+    and the ai_conversations record metadata for UI state restoration.
+    """
+    if not session_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_id required")
+
+    convo = await db["ai_conversations"].find_one({"conversation_id": session_id})
+    if convo is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
+    # Enforce ownership: the conversation must belong to the requesting user
+    convo_user = convo.get("user_id")
+    if convo_user and str(convo_user) != str(current_user.get("id")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to access this conversation")
+
+    cursor = db["chat_history"].find({"session_id": session_id}).sort("created_at")
+    rows = await cursor.to_list(length=None)
+    messages = []
+    for r in rows:
+        role = "user" if r.get("role") == "user" else "assistant"
+        # Ensure any Mongo ObjectId is converted to string for JSON serialization
+        raw_id = r.get("_id")
+        messages.append({
+            "id": str(raw_id) if isinstance(raw_id, ObjectId) else str(raw_id),
+            "sender": role,
+            "text": r.get("message", ""),
+            "timestamp": r.get("created_at"),
+        })
+
+    def _sanitize_doc(d: dict):
+        if d is None:
+            return d
+        out = {}
+        for k, v in d.items():
+            if k == "_id":
+                # Exclude raw Mongo _id by skipping or converting to string key
+                out["id"] = str(v) if isinstance(v, ObjectId) else str(v)
+                continue
+            if isinstance(v, ObjectId):
+                out[k] = str(v)
+            elif isinstance(v, dict):
+                out[k] = _sanitize_doc(v)
+            elif isinstance(v, list):
+                out[k] = [(_sanitize_doc(x) if isinstance(x, dict) else (str(x) if isinstance(x, ObjectId) else x)) for x in v]
+            else:
+                out[k] = v
+        return out
+
+    sanitized_convo = _sanitize_doc(convo)
+
+    return {
+        "session_id": session_id,
+        "conversation_status": sanitized_convo.get("conversation_status"),
+        "conversation": sanitized_convo,
+        "messages": messages,
+    }
 
 
 @router.post("/feedback")

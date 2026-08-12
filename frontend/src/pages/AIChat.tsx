@@ -25,6 +25,7 @@ export const AIChat: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { tokens } = useTheme();
+  const inputRef = React.useRef<HTMLTextAreaElement | null>(null);
 
   const {
     messages,
@@ -70,14 +71,11 @@ export const AIChat: React.FC = () => {
   const handleSendPromptWrapper = async (textToSend: string) => {
     if (!textToSend.trim() || !beginProcessing()) return;
 
-    const isFreshQuery = conversationEndedRef.current;
+    const isFreshQuery = conversationEndedRef.current || conversationStatus === 'RESOLVED';
     conversationEndedRef.current = false;
-    if (isFreshQuery) {
-      resetThread();
-    }
 
     try {
-      await handleSendPrompt(textToSend);
+      await handleSendPrompt(textToSend, !isFreshQuery, isFreshQuery);
     } finally {
       finishProcessing();
     }
@@ -93,9 +91,13 @@ export const AIChat: React.FC = () => {
     }
   };
 
-  const handleGuidedNoWrapper = () => {
-    if (isProcessingRef.current) return;
-    handleGuidedNo();
+  const handleGuidedNoWrapper = async () => {
+    if (!beginProcessing()) return;
+    try {
+      await handleGuidedNo();
+    } finally {
+      finishProcessing();
+    }
   };
 
   const handleConvertTicketWrapper = async () => {
@@ -133,6 +135,12 @@ export const AIChat: React.FC = () => {
       contentRef.current.scrollTop = contentRef.current.scrollHeight;
     }
   }, [messages, isTyping, typingText]);
+
+  useEffect(() => {
+    if (!isTyping && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [isTyping]);
 
   useEffect(() => {
     const state = location.state as { initialPrompt?: string };
@@ -549,14 +557,15 @@ export const AIChat: React.FC = () => {
             >
               <MessageSquare className="w-5 h-5 mr-3 mb-0.5" style={{ color: 'var(--text-tertiary)' }} />
               <textarea 
+                ref={inputRef}
                 id="ai-copilot-message"
                 name="message"
                 placeholder="Ask IT support or troubleshoot connection problems..."
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                disabled={isProcessing}
+                disabled={isProcessing || isTyping}
                 onKeyDown={(e) => {
-                  if (!isProcessing && e.key === 'Enter' && !e.shiftKey) {
+                  if (!isProcessing && !isTyping && e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
                     handleSendPromptWrapper(input);
                   }
@@ -567,7 +576,7 @@ export const AIChat: React.FC = () => {
               />
               <button 
                 onClick={() => handleSendPromptWrapper(input)}
-                disabled={isProcessing}
+                disabled={isProcessing || isTyping}
                 className="p-2 rounded-xl transition-all shrink-0 cursor-pointer ml-2"
                 style={{ backgroundColor: tokens.accentPrimary, color: 'var(--accent-primary-contrast)' }}
                 onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.9'; }}
