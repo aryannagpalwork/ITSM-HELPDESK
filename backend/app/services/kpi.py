@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Literal, Optional
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -83,6 +84,65 @@ async def _get_ticket_reopen_counts(
     return {r["_id"]: r["count"] for r in results}
 
 
+def _audit_metadata_json(log: dict) -> dict[str, Any]:
+    raw = log.get("metadata_json")
+    if not raw:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+    return {}
+
+
+async def _get_ticket_status_reopen_counts(
+    db: AsyncIOMotorDatabase, ticket_ids: list[str]
+) -> dict[str, int]:
+    if not ticket_ids:
+        return {}
+    logs = await db.audit_logs.find(
+        {
+            "entity_type": "ticket",
+            "entity_id": {"$in": ticket_ids},
+            "action": {"$in": ["ticket.updated", "ticket.reopened"]},
+        },
+        {"entity_id": 1, "action": 1, "metadata_json": 1},
+    ).to_list(length=None)
+    counts: dict[str, int] = {ticket_id: 0 for ticket_id in ticket_ids}
+    for log in logs:
+        ticket_id = log.get("entity_id")
+        if not ticket_id:
+            continue
+        action = str(log.get("action") or "")
+        metadata = _audit_metadata_json(log)
+        if action == "ticket.reopened":
+            counts[ticket_id] = counts.get(ticket_id, 0) + 1
+            continue
+        if action != "ticket.updated":
+            continue
+        old_value = str(metadata.get("old_value") or "").strip()
+        new_value = str(metadata.get("new_value") or "").strip()
+        if old_value.lower() in {"resolved", "closed"} and new_value.lower() in {"open", "in progress", "waiting for user response"}:
+            counts[ticket_id] = counts.get(ticket_id, 0) + 1
+            continue
+        for change in metadata.get("changes") or []:
+            if not isinstance(change, dict):
+                continue
+            field = str(change.get("field") or "").strip().lower()
+            if field != "status":
+                continue
+            old_value = str(change.get("old_value") or "").strip().lower()
+            new_value = str(change.get("new_value") or "").strip().lower()
+            if old_value in {"resolved", "closed"} and new_value in {"open", "in progress", "waiting for user response"}:
+                counts[ticket_id] = counts.get(ticket_id, 0) + 1
+                break
+    return counts
+
+
 async def _get_ticket_escalation_counts(
     db: AsyncIOMotorDatabase, ticket_ids: list[str]
 ) -> dict[str, int]:
@@ -98,166 +158,6 @@ async def _get_ticket_escalation_counts(
     ]
     results = await db.audit_logs.aggregate(pipeline).to_list(length=None)
     return {r["_id"]: r["count"] for r in results}
-
-
-async def _get_first_response_map(
-    db: AsyncIOMotorDatabase, ticket_ids: list[str], responder_role: str | None = None
-) -> dict[str, datetime]:
-    if not ticket_ids:
-        return {}
-    comment_ids_cursor = db.tickets.find(
-        {"_id": {"$in": ticket_ids}, "comments": {"$exists": True, "$ne": []}},
-        {"_id": 1, "comments": 1}
-    )
-    ticket_comment_map: dict[str, list[Any]] = {}
-    async for t in comment_ids_cursor:
-        if t.get("comments"):
-            ticket_comment_map[t["_id"]] = t["comments"]
-
-    # Comments are normally stored as ID strings, but some legacy/imported
-    # tickets contain embedded references such as {"_id": "..."} or
-    # {"id": "..."}. Never put the raw reference into a set: dictionaries
-    # are unhashable and caused admin KPI calculation to fail with a 500.
-    def normalize_comment_id(reference: Any) -> Any | None:
-        if isinstance(reference, dict):
-            reference = reference.get("_id", reference.get("id"))
-        if reference is None:
-            return None
-        try:
-            hash(reference)
-        except TypeError:
-            return None
-        return reference
-
-    normalized_map: dict[str, list[Any]] = {}
-    for ticket_id, references in ticket_comment_map.items():
-        normalized_map[ticket_id] = [
-            comment_id
-            for reference in references
-            if (comment_id := normalize_comment_id(reference)) is not None
-        ]
-
-    ticket_comment_map = normalized_map
-    all_comment_ids = list({cid for ids in ticket_comment_map.values() for cid in ids})
-    if not all_comment_ids:
-        return {}
-
-    query: dict = {"_id": {"$in": all_comment_ids}, "is_internal": False}
-    comments = await db.ticket_comments.find(query).to_list(length=None)
-    comment_by_id = {c["_id"]: c for c in comments}
-
-    result: dict[str, datetime] = {}
-    for ticket_id, cids in ticket_comment_map.items():
-        first_dt: datetime | None = None
-        for cid in cids:
-            c = comment_by_id.get(cid)
-            if not c:
-                continue
-            author_role = c.get("author_role", "")
-            if responder_role and author_role and responder_role.lower() not in author_role.lower():
-                continue
-            if not responder_role:
-                is_agent = c.get("author_role") and "agent" in c.get("author_role", "").lower()
-                is_admin = c.get("author_role") and "admin" in c.get("author_role", "").lower()
-                if not (is_agent or is_admin):
-                    continue
-            created = c.get("created_at")
-            if isinstance(created, datetime) and (first_dt is None or created < first_dt):
-                first_dt = created
-        if first_dt:
-            result[ticket_id] = first_dt
-    return result
-
-
-async def _get_ticket_comment_summary(
-    db: AsyncIOMotorDatabase, ticket_ids: list[str]
-) -> dict[str, dict[str, int]]:
-    if not ticket_ids:
-        return {}
-    ticket_rows = await db.tickets.find(
-        {"_id": {"$in": ticket_ids}, "comments": {"$exists": True, "$ne": []}},
-        {"_id": 1, "comments": 1},
-    ).to_list(length=None)
-
-    ticket_comment_map: dict[str, list[Any]] = {}
-    for ticket in ticket_rows:
-        if ticket.get("comments"):
-            ticket_comment_map[ticket["_id"]] = ticket["comments"]
-
-    def normalize_comment_id(reference: Any) -> Any | None:
-        if isinstance(reference, dict):
-            reference = reference.get("_id", reference.get("id"))
-        if reference is None:
-            return None
-        try:
-            hash(reference)
-        except TypeError:
-            return None
-        return reference
-
-    normalized_map: dict[str, list[Any]] = {}
-    for ticket_id, references in ticket_comment_map.items():
-        normalized_map[ticket_id] = [
-            comment_id
-            for reference in references
-            if (comment_id := normalize_comment_id(reference)) is not None
-        ]
-
-    all_comment_ids = list({cid for ids in normalized_map.values() for cid in ids})
-    if not all_comment_ids:
-        return {}
-
-    comments = await db.ticket_comments.find(
-        {"_id": {"$in": all_comment_ids}},
-    ).to_list(length=None)
-    comment_by_id = {c["_id"]: c for c in comments}
-
-    summary: dict[str, dict[str, int]] = {}
-    for ticket_id, cids in normalized_map.items():
-        public_support_comments = 0
-        ai_support_comments = 0
-        agent_support_comments = 0
-        for cid in cids:
-            comment = comment_by_id.get(cid)
-            if not comment or comment.get("is_internal") is True:
-                continue
-            author_role = str(comment.get("author_role") or "").strip().lower()
-            if author_role in {"agent", "administrator", "admin"}:
-                public_support_comments += 1
-                agent_support_comments += 1
-            elif author_role == "ai":
-                public_support_comments += 1
-                ai_support_comments += 1
-        summary[ticket_id] = {
-            "public_support_comments": public_support_comments,
-            "ai_support_comments": ai_support_comments,
-            "agent_support_comments": agent_support_comments,
-        }
-    return summary
-
-
-def _ticket_resolver_kind(ticket: dict) -> str | None:
-    if str(ticket.get("resolved_by") or "").strip().lower() == "ai":
-        return "ai"
-    if str(ticket.get("resolution_source") or "").strip().lower() == "ai":
-        return "ai"
-    if ticket.get("ai_resolved") is True:
-        return "ai"
-    if ticket.get("status") in {"Resolved", "Closed"}:
-        return "agent"
-    return None
-
-
-def _is_first_contact_resolution(ticket: dict, comment_summary: dict[str, int], resolver_kind: str) -> bool:
-    # First-contact resolution is treated as a ticket that reached a terminal
-    # state after at most one public support response, based on the visible
-    # interaction history rather than reopen/escalation proxies.
-    public_support_comments = int(comment_summary.get("public_support_comments", 0))
-    if resolver_kind == "ai":
-        return public_support_comments <= 1 and int(comment_summary.get("ai_support_comments", 0)) <= 1
-    if resolver_kind == "agent":
-        return public_support_comments <= 1 and int(comment_summary.get("agent_support_comments", 0)) <= 1
-    return False
 
 
 def _is_ai_resolved_ticket(ticket: dict) -> bool:
@@ -383,7 +283,7 @@ async def compute_employee_kpis(
 
     reopen_counts = await _get_ticket_reopen_counts(db, ticket_ids)
     escalation_counts = await _get_ticket_escalation_counts(db, ticket_ids)
-    first_resp_map = await _get_first_response_map(db, ticket_ids)
+    response_map = await _get_ticket_response_map(db, ticket_ids)
 
     agent_mttr, ai_mttr = _ticket_mttr_breakdown(resolved_closed)
 
@@ -401,9 +301,9 @@ async def compute_employee_kpis(
     for t in tickets:
         tid = t["_id"]
         created = t.get("created_at")
-        first_resp = first_resp_map.get(tid)
-        if isinstance(created, datetime) and first_resp:
-            elapsed_hours = _hours_between(created, first_resp)
+        response_at = response_map.get(tid)
+        if isinstance(created, datetime) and response_at:
+            elapsed_hours = _hours_between(created, response_at)
             fr_total += elapsed_hours
             fr_n += 1
             priority = t.get("priority", "Medium")
@@ -462,10 +362,8 @@ async def compute_agent_kpis(
         and t["updated_at"] >= today_start
     ])
 
-    reopen_counts = await _get_ticket_reopen_counts(db, ticket_ids)
+    reopen_counts = await _get_ticket_status_reopen_counts(db, ticket_ids)
     escalation_counts = await _get_ticket_escalation_counts(db, ticket_ids)
-    first_resp_map = await _get_first_response_map(db, ticket_ids, responder_role="agent")
-    comment_summary = await _get_ticket_comment_summary(db, ticket_ids)
 
     overdue = 0
     sla_compliant = 0
@@ -489,33 +387,14 @@ async def compute_agent_kpis(
 
     agent_mttr, ai_mttr = _ticket_mttr_breakdown(resolved_closed)
 
-    agent_fcr_n = 0
-    for t in resolved_closed:
-        tid = t["_id"]
-        resolver_kind = _ticket_resolver_kind(t)
-        if _is_first_contact_resolution(t, comment_summary.get(tid, {}), resolver_kind or "") and resolver_kind == "agent":
-            agent_fcr_n += 1
+    agent_fcr_n = sum(
+        1
+        for t in resolved_closed
+        if t.get("status") in {"Resolved", "Closed"}
+        and reopen_counts.get(t["_id"], 0) == 0
+        and escalation_counts.get(t["_id"], 0) == 0
+    )
     agent_fcr = _pct(agent_fcr_n, resolved_count)
-    fr_total = 0.0
-    fr_n = 0
-    fr_sla_met = 0
-    fr_sla_total = 0
-    for t in tickets:
-        tid = t["_id"]
-        created = t.get("created_at")
-        first_resp = first_resp_map.get(tid)
-        if isinstance(created, datetime) and first_resp:
-            elapsed_hours = _hours_between(created, first_resp)
-            fr_total += elapsed_hours
-            fr_n += 1
-            priority = t.get("priority", "Medium")
-            target_min = first_response_minutes(priority)
-            fr_sla_total += 1
-            if elapsed_hours <= target_min / 60.0:
-                fr_sla_met += 1
-    avg_first_response = _round1(fr_total / fr_n) if fr_n else 0.0
-    fr_sla_compliance = _pct(fr_sla_met, fr_sla_total)
-
     resolution_rate = _pct(resolved_count, assigned)
     sla_compliance_pct = _pct(sla_compliant, sla_total) if sla_total else 100.0
 
@@ -542,8 +421,6 @@ async def compute_agent_kpis(
         agentMttrHours=agent_mttr,
         aiMttrHours=ai_mttr,
         agentFcrRate=agent_fcr,
-        avgFirstResponseHours=avg_first_response,
-        firstResponseSlaCompliance=fr_sla_compliance,
         resolutionRate=resolution_rate,
         slaCompliance=sla_compliance_pct,
         reopenRate=reopen_rate,
@@ -566,10 +443,8 @@ async def compute_admin_kpis(db: AsyncIOMotorDatabase) -> AdminKPIs:
 
     backlog = len([t for t in tickets if t["status"] in ("Open", "In Progress", "Waiting for User Response")])
 
-    reopen_counts = await _get_ticket_reopen_counts(db, ticket_ids)
+    reopen_counts = await _get_ticket_status_reopen_counts(db, ticket_ids)
     escalation_counts = await _get_ticket_escalation_counts(db, ticket_ids)
-    first_resp_map = await _get_first_response_map(db, ticket_ids)
-    comment_summary = await _get_ticket_comment_summary(db, ticket_ids)
 
     sla_compliant = 0
     sla_total = 0
@@ -598,37 +473,20 @@ async def compute_admin_kpis(db: AsyncIOMotorDatabase) -> AdminKPIs:
 
     agent_mttr, ai_mttr = _ticket_mttr_breakdown(resolved_closed)
 
-    agent_fcr_n = 0
-    reopened_n = 0
-    for t in resolved_closed:
-        tid = t["_id"]
-        resolver_kind = _ticket_resolver_kind(t)
-        if _is_first_contact_resolution(t, comment_summary.get(tid, {}), resolver_kind or "") and resolver_kind == "agent":
-            agent_fcr_n += 1
-        if reopen_counts.get(tid, 0) > 0:
-            reopened_n += 1
+    agent_fcr_n = sum(
+        1
+        for t in resolved_closed
+        if t.get("status") in {"Resolved", "Closed"}
+        and reopen_counts.get(t["_id"], 0) == 0
+        and escalation_counts.get(t["_id"], 0) == 0
+    )
     org_agent_fcr = _pct(agent_fcr_n, resolved_count)
-    reopen_rate_pct = _pct(reopened_n, resolved_count)
+    reopen_rate_pct = _pct(sum(1 for t in resolved_closed if reopen_counts.get(t["_id"], 0) > 0), resolved_count)
 
     sla_compliance_pct = _pct(sla_compliant, sla_total) if sla_total else 100.0
     sla_breaches = max(0, sla_total - sla_compliant)
 
     # First-response SLA compliance (org-wide)
-    fr_sla_met = 0
-    fr_sla_total = 0
-    for t in tickets:
-        tid = t["_id"]
-        created = _coerce_datetime(t.get("created_at"))
-        first_resp = first_resp_map.get(tid)
-        if isinstance(created, datetime) and first_resp:
-            elapsed_hours = _hours_between(created, first_resp)
-            priority = t.get("priority", "Medium")
-            target_min = first_response_minutes(priority)
-            fr_sla_total += 1
-            if elapsed_hours <= target_min / 60.0:
-                fr_sla_met += 1
-    fr_sla_compliance = _pct(fr_sla_met, fr_sla_total)
-
     conversations = await _get_ai_conversation_rows(db)
     if conversations:
         ai_queries_count = len(conversations)
@@ -681,7 +539,6 @@ async def compute_admin_kpis(db: AsyncIOMotorDatabase) -> AdminKPIs:
         activeSlaTickets=active_sla_tickets,
         nearBreachTickets=near_breach_tickets,
         criticalSlaBreaches=critical_sla_breaches,
-        firstResponseSlaCompliance=fr_sla_compliance,
         ticketBacklog=backlog,
         aiResolutionRate=ai_resolution_rate,
         aiQueries=ai_queries_count,
