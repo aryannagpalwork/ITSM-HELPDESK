@@ -12,8 +12,6 @@ import {
   RefreshCcw,
   Sparkles,
   Timer,
-  Target,
-  Smile,
   Inbox,
   ChevronRight,
   AlertTriangle,
@@ -26,9 +24,11 @@ import {
   CheckCircle2,
   ExternalLink,
   RefreshCw,
+  Settings,
 } from 'lucide-react';
 import { SystemAlert } from '../../shared/types';
 import { getAutoDetectedActiveAlerts } from '../../shared/api';
+import { SLAConfigInline } from './components/SLAConfigPanel';
 
 const TicketLifecycleDetailChart = lazy(() => import('./components/charts/TicketLifecycleDetailChart'));
 const SLAComplianceChart = lazy(() => import('./components/charts/SLAComplianceChart'));
@@ -61,6 +61,8 @@ export const AdminDashboard: React.FC = () => {
   // Persistent Active Anomalies state & 30s polling
   const [activeAnomalies, setActiveAnomalies] = useState<SystemAlert[]>([]);
   const [anomaliesLoading, setAnomaliesLoading] = useState(false);
+
+  const [slaConfigOpen, setSlaConfigOpen] = useState(false);
 
   const fetchAnomalies = async () => {
     try {
@@ -121,9 +123,9 @@ export const AdminDashboard: React.FC = () => {
   }
 
   // Derived merged values (prefer backend adminKPIs where available).
-  const orgMTTR = adminKPIs?.orgMttrHours ?? null;
-  const orgFCR = adminKPIs?.orgFcrRate ?? null;
-  const orgCSAT = adminKPIs?.orgCsatScore ?? null;
+  const agentMTTR = adminKPIs?.agentMttrHours ?? null;
+  const aiMTTR = adminKPIs?.aiMttrHours ?? null;
+  const orgAgentFCR = adminKPIs?.orgAgentFcrRate ?? null;
   const richKpisAvailable = adminKPIs !== null && isAdmin;
   const kpiLoading = isAdmin && kpisLoading && !adminKPIs;
 
@@ -150,7 +152,7 @@ export const AdminDashboard: React.FC = () => {
           </span>
           <h1 className="text-2xl font-bold text-primary tracking-tight">System Administration</h1>
           <p className="text-xs text-secondary">
-            Monitor organizational resolution quality, satisfaction, and the live incident queue.
+            Monitor organizational resolution quality and the live incident queue.
           </p>
         </div>
 
@@ -178,7 +180,7 @@ export const AdminDashboard: React.FC = () => {
             <div>
               <h2 className="text-xs font-bold text-primary flex items-center gap-2">
                 <span>Active Category Anomalies</span>
-                <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-300">
+                <span className="admin-auto-detected-badge text-[9px] font-mono px-2 py-0.5 rounded bg-zinc-800 !text-white">
                   Auto-Detected ({activeAnomalies.length})
                 </span>
               </h2>
@@ -266,35 +268,35 @@ export const AdminDashboard: React.FC = () => {
         )}
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
           <KpiCard
-            label="Mean Time To Resolve"
+            label="Agent MTTR"
             icon={<Timer className="w-3.5 h-3.5 text-sky-400" />}
-            value={orgMTTR !== null ? `${orgMTTR} hr` : '—'}
+            value={agentMTTR !== null ? `${agentMTTR} hr` : '—'}
             valueClass="text-sky-400"
-            sublabel={richKpisAvailable ? 'Org-wide average resolution time' : 'Calculating…'}
+            sublabel={richKpisAvailable ? 'Average resolution time for agent-resolved tickets' : 'Calculating…'}
             loading={kpiLoading}
-            isActive={filterActive('Mean Time To Resolve')}
+            isActive={filterActive('Agent MTTR')}
             onClick={() => goToTickets('?status=resolved')}
             onOpen={() => goToTickets('?status=resolved')}
           />
           <KpiCard
-            label="First Contact Resolution"
-            icon={<Target className="w-3.5 h-3.5 text-green-400" />}
-            value={orgFCR !== null ? `${orgFCR}%` : '—'}
-            valueClass="text-green-400"
-            sublabel={richKpisAvailable ? 'Resolved on first contact' : 'Pending data'}
+            label="AI MTTR"
+            icon={<Bot className="w-3.5 h-3.5 text-violet-400" />}
+            value={aiMTTR !== null ? `${aiMTTR} hr` : '—'}
+            valueClass="text-violet-400"
+            sublabel={richKpisAvailable ? 'Average resolution time for AI-resolved tickets' : 'Pending data'}
             loading={kpiLoading}
-            isActive={filterActive('First Contact Resolution')}
+            isActive={filterActive('AI MTTR')}
             onClick={() => goToTickets('?status=resolved')}
             onOpen={() => goToTickets('?status=resolved')}
           />
           <KpiCard
-            label="User Satisfaction (CSAT)"
-            icon={<Smile className="w-3.5 h-3.5 text-emerald-400" />}
-            value={orgCSAT !== null ? `${orgCSAT}%` : '—'}
-            valueClass="text-emerald-400"
-            sublabel={richKpisAvailable ? 'Derived satisfaction index' : 'Pending data'}
+            label="Agent First Contact Resolution"
+            icon={<UserCheck className="w-3.5 h-3.5 text-cyan-400" />}
+            value={orgAgentFCR !== null ? `${orgAgentFCR}%` : '—'}
+            valueClass="text-cyan-400"
+            sublabel={richKpisAvailable ? 'First-contact agent resolutions' : 'Pending data'}
             loading={kpiLoading}
-            isActive={filterActive('User Satisfaction (CSAT)')}
+            isActive={filterActive('Agent First Contact Resolution')}
             onClick={() => goToTickets('?status=resolved')}
             onOpen={() => goToTickets('?status=resolved')}
           />
@@ -413,7 +415,7 @@ export const AdminDashboard: React.FC = () => {
               </button>
             ))}
           </div>
-          <div className="flex-1 min-h-0">
+          <div className="h-[400px] shrink-0">
             <Suspense fallback={<ChartFallback />}>
               <TicketLifecycleDetailChart data={ticketTimeline} />
             </Suspense>
@@ -426,10 +428,24 @@ export const AdminDashboard: React.FC = () => {
           description="Resolved tickets compared with configured service targets"
           loading={timelinesLoading && !analytics}
           error={timelinesError}
-          empty={!timelinesLoading && !hasResolvedTickets}
-          emptyMessage="No resolved tickets found for the selected period."
           contentClassName="mt-4"
+          actions={isAdmin ? (
+            <button
+              onClick={() => setSlaConfigOpen(!slaConfigOpen)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-medium border transition-all ${
+                slaConfigOpen
+                  ? 'bg-purple-500/20 text-purple-400 border-purple-500/30'
+                  : 'bg-zinc-800/50 text-zinc-400 hover:text-white border-zinc-700/50'
+              }`}
+              title="Configure SLA targets"
+            >
+              <Settings className="w-3 h-3" />
+              Configure
+            </button>
+          ) : undefined}
         >
+          <SLAConfigInline open={slaConfigOpen} onClose={() => setSlaConfigOpen(false)} />
+
           <div className="grid grid-cols-2 gap-2.5 mb-5">
             {[
               { label: 'Overall Compliance', value: `${slaCompliance}%`, color: 'text-emerald-400', filter: 'resolved' },
@@ -449,21 +465,7 @@ export const AdminDashboard: React.FC = () => {
               </button>
             ))}
           </div>
-          <div className="grid grid-cols-2 gap-2 mb-4" aria-label="SLA target reference">
-            {[
-              { priority: 'Critical', first: '15m', resolution: '4h', color: 'text-rose-400' },
-              { priority: 'High', first: '30m', resolution: '8h', color: 'text-amber-400' },
-              { priority: 'Medium', first: '2h', resolution: '24h', color: 'text-sky-400' },
-              { priority: 'Low', first: '4h', resolution: '72h', color: 'text-emerald-400' },
-            ].map(target => (
-              <div key={target.priority} className="rounded-xl border border-token bg-card-solid px-3 py-2.5">
-                <span className={`block text-[10px] font-semibold ${target.color}`}>{target.priority}</span>
-                <span className="mt-1 block text-[9px] text-tertiary">First response <strong className="text-secondary">{target.first}</strong></span>
-                <span className="block text-[9px] text-tertiary">Resolution <strong className="text-secondary">{target.resolution}</strong></span>
-              </div>
-            ))}
-          </div>
-          <div className="h-[470px]">
+          <div className="h-[400px]">
             <Suspense fallback={<ChartFallback />}>
               <SLAComplianceChart data={slaItems} />
             </Suspense>

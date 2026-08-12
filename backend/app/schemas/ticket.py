@@ -16,7 +16,7 @@ class TicketPriority(str, Enum):
 class TicketStatus(str, Enum):
     open = "Open"
     in_progress = "In Progress"
-    awaiting_user_response = "Awaiting User Response"
+    waiting_for_user_response = "Waiting for User Response"
     resolved = "Resolved"
     closed = "Closed"
 
@@ -95,7 +95,8 @@ class TicketCreate(BaseModel):
     @classmethod
     def normalize_status(cls, value: str | TicketStatus) -> str | TicketStatus:
         if isinstance(value, str):
-            return value.replace("_", " ").title()
+            normalized = value.replace("_", " ").title()
+            return "Waiting for User Response" if normalized == "Waiting For User Response" else normalized
         return value
 
 
@@ -130,7 +131,8 @@ class TicketUpdate(BaseModel):
     @classmethod
     def normalize_status(cls, value: str | TicketStatus | None) -> str | TicketStatus | None:
         if isinstance(value, str):
-            return value.replace("_", " ").title()
+            normalized = value.replace("_", " ").title()
+            return "Waiting for User Response" if normalized == "Waiting For User Response" else normalized
         return value
 
 
@@ -183,12 +185,13 @@ class TicketRead(ORMBase):
     def normalize_legacy_status(cls, value: str | TicketStatus) -> str | TicketStatus:
         if isinstance(value, str):
             legacy_statuses = {
-                "awaiting user response": "Open",
                 "awaiting customer response": "Open",
                 "pending": "Open",
                 "new": "Open",
             }
             normalized = value.replace("_", " ").strip()
+            if normalized.lower() == "waiting for user response":
+                return TicketStatus.waiting_for_user_response.value
             return legacy_statuses.get(normalized.lower(), normalized.title())
         return value
 

@@ -19,7 +19,7 @@ export interface Department {
   name: string;
 }
 
-export type TicketStatus = 'open' | 'in_progress' | 'awaiting_user_response' | 'resolved' | 'closed';
+export type TicketStatus = 'open' | 'in_progress' | 'waiting_for_user_response' | 'resolved' | 'closed';
 export type TicketPriority = 'low' | 'medium' | 'high' | 'critical';
 
 export interface Ticket {
@@ -255,6 +255,7 @@ export interface EmployeeKPIs {
   mttrHours: number;
   fcrRate: number;
   avgFirstResponseHours: number;
+  firstResponseSlaCompliance: number;
   reopenedTickets: number;
   aiCopilot: AICopilotEmployeeKPIs;
 }
@@ -327,13 +328,14 @@ export interface AgentKPIs {
   resolvedTickets: number;
   resolvedToday: number;
   overdueTickets: number;
-  mttrHours: number;
-  fcrRate: number;
+  agentMttrHours: number;
+  aiMttrHours: number;
+  agentFcrRate: number;
   avgFirstResponseHours: number;
+  firstResponseSlaCompliance: number;
   resolutionRate: number;
   slaCompliance: number;
   reopenRate: number;
-  csatScore: number;
   aiCopilot: AICopilotAgentKPIs;
 }
 
@@ -349,14 +351,15 @@ export interface AICopilotAdminKPIs {
 export interface AdminKPIs {
   systemUsers: number;
   activeAgents: number;
-  orgMttrHours: number;
-  orgFcrRate: number;
-  orgCsatScore: number;
+  agentMttrHours: number;
+  aiMttrHours: number;
+  orgAgentFcrRate: number;
   slaCompliance: number;
   slaBreaches: number;
   activeSlaTickets: number;
   nearBreachTickets: number;
   criticalSlaBreaches: number;
+  firstResponseSlaCompliance: number;
   ticketBacklog: number;
   aiResolutionRate: number;
   aiQueries: number;

@@ -81,7 +81,7 @@ export const AgentAlertManagement: React.FC = () => {
               }`}
             >
               <span>Manual Alerts</span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-800 text-zinc-300">
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-800 !text-white">
                 {manualAlerts.length}
               </span>
             </button>
@@ -96,7 +96,7 @@ export const AgentAlertManagement: React.FC = () => {
               }`}
             >
               <span>Automatic Alerts</span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-800 text-zinc-300">
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-800 !text-white">
                 {autoAlerts.length}
               </span>
             </button>
@@ -118,11 +118,11 @@ export const AgentAlertManagement: React.FC = () => {
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2 mb-2">
                       <span className="text-sm font-bold text-primary">{item.title}</span>
-                      <span className="text-[9px] font-mono px-2 py-0.5 rounded uppercase font-semibold bg-zinc-800 text-zinc-300">
+                      <span className="text-[9px] font-mono px-2 py-0.5 rounded uppercase font-semibold bg-zinc-800 !text-white">
                         {item.source === 'auto_detected' ? 'Auto-Detected' : 'Manual'}
                       </span>
                       {item.category && (
-                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-300">
+                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-zinc-900 !text-white">
                           {item.category}
                         </span>
                       )}

@@ -94,7 +94,7 @@ export const EmployeeSidebar: React.FC = () => {
               <button
                 key={item.path}
                 onClick={() => handleNavigation(item.path)}
-                className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all group"
+                className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium leading-tight transition-all group"
                 style={{
                   backgroundColor: isActive ? 'var(--sidebar-active)' : 'transparent',
                   color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
@@ -113,20 +113,20 @@ export const EmployeeSidebar: React.FC = () => {
                   }
                 }}
               >
-                <div className="flex items-center space-x-3">
+                <div className="flex items-center gap-3 min-w-0 flex-1">
                   <IconComponent
                     className="w-4 h-4 transition-transform duration-200 group-hover:scale-105"
                     style={{ color: isActive ? 'var(--accent-primary)' : 'var(--text-tertiary)' }}
                   />
-                  <span>{item.name}</span>
+                  <span className="truncate">{item.name}</span>
                 </div>
                 {item.badge ? (
                   <span
-                    className="text-[9px] font-mono font-semibold px-1.5 py-0.5 rounded border"
+                    className="shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold leading-none tracking-wide"
                     style={{
                       backgroundColor: 'var(--accent-primary-bg)',
-                      color: 'var(--accent-primary)',
-                      borderColor: 'var(--border-strong)',
+                      color: 'var(--text-primary)',
+                      borderColor: 'var(--accent-primary)',
                     }}
                   >
                     {item.badge}

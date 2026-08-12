@@ -69,6 +69,12 @@ html, body, #root {
   color: var(--text-primary);
 }
 
+body {
+  font-size: 16px;
+  line-height: 1.55;
+  letter-spacing: -0.01em;
+}
+
 /* Smooth theme transition (150–250ms) on color-bearing properties.
  * Elements that declare their own transition (e.g. Tailwind's transition-*)
  * keep it thanks to higher specificity, so interactive animations are
@@ -150,9 +156,99 @@ html, body, #root {
  * hard to read. These unlayered rules override the equivalent Tailwind
  * utilities (which live in a cascade layer) to guarantee a legible minimum
  * of ~12–13px everywhere — one central change, no per-component edits. */
-.text-\[9px\]  { font-size: 11px; }
-.text-\[10px\] { font-size: 12px; }
-.text-\[11px\] { font-size: 13px; }
+.text-\[8px\]  { font-size: 12px; line-height: 1.45; }
+.text-\[9px\]  { font-size: 12px; line-height: 1.45; }
+.text-\[10px\] { font-size: 13px; line-height: 1.45; }
+.text-\[11px\] { font-size: 14px; line-height: 1.45; }
+
+/* Slightly more breathing room for compact utility text. */
+.text-xs { font-size: 0.875rem; line-height: 1.5; }
+.text-sm { font-size: 1rem; line-height: 1.45; }
+
+/* Agent dashboard monochrome text contract.
+ * Keeps the screen readable across themes without altering layout or behavior. */
+.agent-dashboard {
+  color: #ffffff;
+}
+:root[data-theme="light"] .agent-dashboard {
+  color: #000000;
+}
+.agent-dashboard * {
+  color: inherit;
+}
+.agent-dashboard :is(p, span, h1, h2, h3, h4, h5, h6, label, button, li, td, th, input, textarea, select, option, small) {
+  color: inherit !important;
+}
+.agent-dashboard .accent-btn,
+.agent-dashboard button[style*="backgroundColor"] {
+  color: inherit !important;
+}
+.agent-dashboard input::placeholder,
+.agent-dashboard textarea::placeholder {
+  color: inherit;
+  opacity: 0.72;
+}
+
+/* Admin dashboard auto-detected badge: keep it readable in light themes. */
+.admin-auto-detected-badge {
+  color: #ffffff;
+  background-color: #27272a;
+  border-color: #3f3f46;
+  font-weight: 700;
+}
+:root[data-theme="light"] .admin-auto-detected-badge,
+:root[data-theme="forest"] .admin-auto-detected-badge,
+:root[data-theme="soft-black"] .admin-auto-detected-badge {
+  color: #ffffff;
+  background-color: #27272a;
+  border-color: #3f3f46;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+/* SLA config panel: strict monochrome text within this card only. */
+.sla-config-inline {
+  color: #ffffff;
+}
+:root[data-theme="light"] .sla-config-inline {
+  color: #000000;
+}
+.sla-config-inline .text-primary,
+.sla-config-inline .text-secondary,
+.sla-config-inline .text-tertiary,
+.sla-config-inline .text-white,
+.sla-config-inline .text-zinc-100,
+.sla-config-inline .text-zinc-200,
+.sla-config-inline .text-zinc-300,
+.sla-config-inline .text-zinc-400,
+.sla-config-inline .text-zinc-500 {
+  color: inherit;
+}
+.sla-config-inline .input-token {
+  color: inherit;
+}
+.sla-config-inline .input-token::placeholder {
+  color: inherit;
+  opacity: 0.72;
+}
+
+/* Small card text and badge-like labels only.
+ * Larger headings and layout text remain untouched. */
+:root[data-theme="light"] :is(.text-xs, .text-\[9px\], .text-\[10px\], .text-\[11px\]) {
+  color: #000000;
+}
+
+:root:not([data-theme="light"]) :is(.text-xs, .text-\[9px\], .text-\[10px\], .text-\[11px\]) {
+  color: #ffffff;
+}
+
+:root[data-theme="light"] :is(.text-xs.font-semibold, .text-xs.font-medium, .text-xs.font-bold, .text-\[9px\].font-mono, .text-\[10px\].font-mono, .text-\[11px\].font-semibold) {
+  color: #000000;
+}
+
+:root:not([data-theme="light"]) :is(.text-xs.font-semibold, .text-xs.font-medium, .text-xs.font-bold, .text-\[9px\].font-mono, .text-\[10px\].font-mono, .text-\[11px\].font-semibold) {
+  color: #ffffff;
+}
 
 /* Native date input controls */
 .input-token[type="date"] {

@@ -110,7 +110,7 @@ export const AdminDashboard: React.FC = () => {
             <div>
               <h2 className="text-sm font-bold text-white flex items-center gap-2">
                 <span>Active Category Anomalies</span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                <span className="admin-auto-detected-badge inline-flex items-center rounded-full border border-purple-500/25 bg-purple-500/10 px-2.5 py-0.5 text-[10px] font-semibold leading-none tracking-wide text-purple-200">
                   Auto-Detected ({activeAnomalies.length})
                 </span>
               </h2>

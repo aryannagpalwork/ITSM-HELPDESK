@@ -116,7 +116,7 @@ const TicketLifecycleDetailChart: React.FC<Props> = ({ data }) => {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 pt-5">
+      <div className="min-h-[180px] flex-1 shrink-0 pt-5">
         {hasData ? (
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={points} margin={{ top: 14, right: 10, left: 8, bottom: 30 }}>

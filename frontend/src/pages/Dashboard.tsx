@@ -77,7 +77,7 @@ const getStatusBadgeColor = (status: TicketStatus) => {
   switch (status) {
     case 'open': return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
     case 'in_progress': return 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20';
-    case 'awaiting_user_response': return 'bg-amber-500/10 text-amber-400 border border-amber-500/20';
+    case 'waiting_for_user_response': return 'bg-amber-500/10 text-amber-400 border border-amber-500/20';
     case 'resolved': return 'bg-sky-500/10 text-sky-400 border border-sky-500/20';
     case 'closed': return 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20';
   }

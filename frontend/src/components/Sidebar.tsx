@@ -123,20 +123,23 @@ export const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
               <button
                 key={item.path}
                 onClick={() => handleNavigation(item.path)}
-                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all group ${
+                className={`w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium leading-tight transition-all group ${
                   isActive
                     ? 'bg-zinc-900 text-white border-l-2 border-indigo-500 font-semibold'
                     : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/40'
                 }`}
               >
-                <div className="flex items-center space-x-3">
+                <div className="flex items-center gap-3 min-w-0 flex-1">
                   <IconComponent className={`w-4 h-4 transition-transform duration-200 group-hover:scale-105 ${
                     isActive ? 'text-indigo-400' : 'text-zinc-500 group-hover:text-zinc-300'
                   }`} />
-                  <span>{item.name}</span>
+                  <span className="truncate">{item.name}</span>
                 </div>
                 {item.badge ? (
-                  <span className="text-[9px] font-mono font-semibold px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                  <span
+                    className="shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold leading-none tracking-wide bg-indigo-500/10 border-indigo-500/20"
+                    style={{ color: 'var(--text-primary)' }}
+                  >
                     {item.badge}
                   </span>
                 ) : (

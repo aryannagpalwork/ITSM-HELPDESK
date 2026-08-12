@@ -18,7 +18,7 @@ export const TopNavbar: React.FC<{ title?: string }> = ({ title }) => {
     switch (currentUser.role) {
       case 'Administrator': return '/admin/dashboard';
       case 'Agent': return '/agent/dashboard';
-      case 'Employee': return '/employee/dashboard';
+      case 'Employee': return '/dashboard';
       default: return '/agent/dashboard';
     }
   };

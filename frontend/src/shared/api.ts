@@ -222,7 +222,7 @@ interface BackendTicket {
   description: string;
   category: string;
   priority: 'Low' | 'Medium' | 'High' | 'Critical';
-  status: 'Open' | 'In Progress' | 'Awaiting User Response' | 'Resolved' | 'Closed';
+  status: 'Open' | 'In Progress' | 'Awaiting User Response' | 'Waiting for User Response' | 'Resolved' | 'Closed';
   awaiting_user_response?: boolean;
   assigned_to?: string;
   assigned_to_name?: string;
@@ -423,14 +423,15 @@ const statusToFrontend = (
   status: BackendTicket['status'],
   awaitingUserResponse = false,
 ): TicketStatus => {
-  if (awaitingUserResponse) return 'awaiting_user_response';
+  if (awaitingUserResponse) return 'waiting_for_user_response';
 
   const normalized = String(status || 'Open').trim().toLowerCase().replace(/_/g, ' ');
   const map: Record<string, TicketStatus> = {
     open: 'open',
     'in progress': 'in_progress',
-    'awaiting user response': 'awaiting_user_response',
-    'awaiting customer response': 'awaiting_user_response',
+    'waiting for user response': 'waiting_for_user_response',
+    'awaiting user response': 'waiting_for_user_response',
+    'awaiting customer response': 'waiting_for_user_response',
     resolved: 'resolved',
     closed: 'closed',
   };
@@ -1504,4 +1505,33 @@ export const markAllNotificationsRead = async (): Promise<void> => {
     const errorMsg = await extractErrorFromResponse(response);
     throw new Error(errorMsg);
   }
+};
+
+export interface PrioritySLAConfig {
+  sla_target_hours: number;
+  first_response_minutes: number;
+}
+
+export interface SLAConfig {
+  critical: PrioritySLAConfig;
+  high: PrioritySLAConfig;
+  medium: PrioritySLAConfig;
+  low: PrioritySLAConfig;
+  near_breach_percent: number;
+}
+
+export const getSLAConfig = async (): Promise<SLAConfig> => {
+  const response = await apiFetch(`${API_BASE_URL}/sla-config`);
+  if (!response.ok) throw new Error('Failed to load SLA configuration');
+  return response.json();
+};
+
+export const updateSLAConfig = async (config: Partial<SLAConfig>): Promise<SLAConfig> => {
+  const response = await apiFetch(`${API_BASE_URL}/sla-config`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+  if (!response.ok) throw new Error('Failed to update SLA configuration');
+  return response.json();
 };

@@ -23,6 +23,26 @@ TEMPERATURE_UNSUPPORTED_MODEL_PREFIXES = (
 )
 
 
+def _build_conversation_summary(
+    chat_history: list[ChatMessage], user_feedback: Optional[str] = None
+) -> str:
+    """Create a readable incident handoff when structured LLM output is unavailable."""
+    def excerpt(message: str) -> str:
+        normalized = " ".join(message.split())
+        return normalized[:280] + ("..." if len(normalized) > 280 else "")
+
+    user_messages = [excerpt(message.content) for message in chat_history if message.role.value == "user" and message.content.strip()]
+    assistant_messages = [excerpt(message.content) for message in chat_history if message.role.value == "assistant" and message.content.strip()]
+    parts = []
+    if user_messages:
+        parts.append(f"User reported: {user_messages[-1]}")
+    if assistant_messages:
+        parts.append(f"AI Copilot response: {assistant_messages[-1]}")
+    if user_feedback:
+        parts.append(f"Current outcome: {excerpt(user_feedback)}")
+    return " ".join(parts) or "Chat session escalated to IT support for investigation."
+
+
 class OpenAIService(LLMService):
     """Service for interacting with OpenAI API"""
 
@@ -144,7 +164,7 @@ Chat History:
 Generate ONLY a valid JSON object in this format (no markdown, no extra text):
 {{
     "title": "Concise ticket title summarizing the issue",
-    "summary": "Brief summary of the issue",
+    "summary": "2-4 sentence incident handoff. Separately state what the user reported (including relevant impact/context) and what the AI Copilot investigated, advised, or tried, then state the current outcome or next step. Do not return a generic one-line issue description.",
     "category": "One of: Hardware, Software, Network, Access, Permissions, Training, General",
     "priority": "One of: Low, Medium, High, Critical",
     "description": "Full description of the issue including all relevant details from chat history"
@@ -176,11 +196,13 @@ Generate ONLY a valid JSON object in this format (no markdown, no extra text):
 
             try:
                 ticket_details = json.loads(text)
+                if not str(ticket_details.get("summary") or "").strip():
+                    ticket_details["summary"] = _build_conversation_summary(chat_history, user_feedback)
                 return ticket_details, usage
             except json.JSONDecodeError:
                 return {
                     "title": "Support Request",
-                    "summary": "User requested support",
+                    "summary": _build_conversation_summary(chat_history, user_feedback),
                     "category": "General",
                     "priority": "Medium",
                     "description": history_text,

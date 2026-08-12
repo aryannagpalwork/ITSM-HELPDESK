@@ -50,15 +50,15 @@ const KpiCardBase: React.FC<KpiCardProps> = ({
         isActive ? 'border-token-strong ring-1 ring-accent/40' : 'border-token hover-border'
       }`}
     >
-      <div className="flex justify-between items-start text-tertiary">
+      <div className="flex justify-between items-start text-secondary">
         <span className="text-[9px] font-mono uppercase">{label}</span>
         {icon}
       </div>
       <h2 className={`text-xl font-bold mt-1 ${valueClass}`}>
-        {loading ? <Loader2 className="w-4 h-4 animate-spin text-tertiary" /> : value}
+        {loading ? <Loader2 className="w-4 h-4 animate-spin text-secondary" /> : value}
       </h2>
       {sublabel && (
-        <span className="text-[8px] font-mono text-tertiary block mt-1">{sublabel}</span>
+        <span className="text-[8px] font-mono text-secondary block mt-1">{sublabel}</span>
       )}
       {onOpen && (
         <button
@@ -69,7 +69,7 @@ const KpiCardBase: React.FC<KpiCardProps> = ({
             e.stopPropagation();
             onOpen();
           }}
-          className="absolute bottom-2 right-2 p-1 rounded-md hover-elev text-tertiary hover-text opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+          className="absolute bottom-2 right-2 p-1 rounded-md hover-elev text-secondary hover-text opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
         >
           <ArrowUpRight className="w-3 h-3" />
         </button>
