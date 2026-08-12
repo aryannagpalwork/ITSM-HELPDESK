@@ -264,3 +264,72 @@ body {
   opacity: 0.85;
   cursor: pointer;
 }
+
+/* ─────────────────────────────────────────────────────────────
+ * NOTIFICATION / TOAST READABILITY
+ *
+ * Toast popups and the bell dropdown use dark backgrounds
+ * (#0e0e11 / #09090b) regardless of the active theme. The
+ * global light-theme rules above force .text-xs / [10px] etc.
+ * to black, which makes them invisible on dark backgrounds.
+ * These scoped, explicit overrides restore white/light text
+ * inside any dark-background notification container — and
+ * they apply in ALL themes, so light theme no longer breaks.
+ * ───────────────────────────────────────────────────────────── */
+
+/* 1) Custom toast popup + bell dropdown (src/components/NotificationCenter.tsx)
+ *    Both have hardcoded dark backgrounds. Classes `.nc-toast` and
+ *    `.nc-dropdown` are applied directly to the container divs. */
+:root[data-theme="light"] :is(.nc-toast, .nc-dropdown) {
+  color: #ffffff;
+}
+:root[data-theme="light"] :is(.nc-toast, .nc-dropdown) :is(p, span, div, strong, small, button, label, a) {
+  color: #ffffff !important;
+}
+:root[data-theme="light"] :is(.nc-toast, .nc-dropdown) :is(.text-zinc-300, .text-zinc-400, .text-zinc-500, .text-zinc-600) {
+  color: #d4d4d8 !important;
+}
+:root[data-theme="light"] :is(.nc-toast, .nc-dropdown) :is(.text-emerald-200, .text-emerald-300\/80, .text-amber-200, .text-purple-400, .text-rose-400, .text-blue-400) {
+  color: #ffffff !important;
+}
+:root[data-theme="light"] :is(.nc-toast, .nc-dropdown) .hover\\:text-white:hover {
+  color: #ffffff !important;
+}
+
+/* 2) react-hot-toast library — keep white text on default dark toasts */
+:root[data-theme="light"] .react-hot-toast,
+:root[data-theme="light"] [class*="hot-toast"] {
+  color: #ffffff !important;
+}
+:root[data-theme="light"] :is(.react-hot-toast, [class*="hot-toast"]) :is(p, span, div, strong, small) {
+  color: #ffffff !important;
+}
+
+/* 3) Agent dashboard reassign-success toast (dark emerald inline-style bg) */
+:root[data-theme="light"] .fixed.top-6.right-6.z-\\[70\\],
+:root[data-theme="light"] .fixed.top-6.right-6.z-\\[70\\] :is(p, span, div, .text-xs, .text-\\[10px\\], .text-emerald-200, .text-emerald-300\\/80) {
+  color: #ffffff !important;
+}
+
+/* 4) TicketDetails inline success/error toast (dark #064e3b / #450a0a inline bg) */
+:root[data-theme="light"] .fixed.top-4.right-4.z-50,
+:root[data-theme="light"] .fixed.top-4.right-4.z-50 :is(span, p, .text-xs) {
+  color: #ffffff !important;
+}
+
+/* 5) Broad safety net: any element with an inline dark background-color
+ *    overrides the global "text-xs → black" rule inside it.
+ *    This catches any remaining dark-background popups the targeted rules
+ *    above may have missed (future additions too). */
+:root[data-theme="light"] *[style*="background-color:"][style*="#0e0e11"],
+:root[data-theme="light"] *[style*="background-color:"][style*="#064e3b"],
+:root[data-theme="light"] *[style*="background-color:"][style*="#450a0a"],
+:root[data-theme="light"] *[style*="background-color:"][style*="#09090b"] {
+  color: #ffffff;
+}
+:root[data-theme="light"] *[style*="background-color:"][style*="#0e0e11"] :is(p, span, div, strong, small, .text-xs, .text-\\[9px\\], .text-\\[10px\\], .text-\\[11px\\]),
+:root[data-theme="light"] *[style*="background-color:"][style*="#064e3b"] :is(p, span, div, strong, small, .text-xs),
+:root[data-theme="light"] *[style*="background-color:"][style*="#450a0a"] :is(p, span, div, strong, small, .text-xs),
+:root[data-theme="light"] *[style*="background-color:"][style*="#09090b"] :is(p, span, div, strong, small, .text-xs, .text-\\[9px\\], .text-\\[10px\\], .text-\\[11px\\]) {
+  color: #ffffff !important;
+}

@@ -306,12 +306,12 @@ export const NotificationCenter: React.FC = () => {
       </button>
 
       {/* ── Toast Popups ── wider, fully opaque, high z-index */}
-      <div className="fixed top-16 right-4 z-[9999] flex flex-col gap-3 pointer-events-none" style={{ width: '420px', maxWidth: '95vw' }}>
+      <div className="nc-toast-stack fixed top-16 right-4 z-[9999] flex flex-col gap-3 pointer-events-none" style={{ width: '420px', maxWidth: '95vw' }}>
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className="pointer-events-auto rounded-2xl shadow-2xl shadow-black/80 border border-zinc-600 flex items-start gap-3 animate-slideInRight"
-            style={{ padding: '16px 18px', backgroundColor: '#0e0e11' }}
+            className="nc-toast pointer-events-auto rounded-2xl shadow-2xl shadow-black/80 border border-zinc-600 flex items-start gap-3 animate-slideInRight"
+            style={{ padding: '16px 18px', backgroundColor: '#0e0e11', color: '#ffffff' }}
           >
             <div className="shrink-0 mt-0.5">
               {toast.itemType === 'alert' || toast.alertId ? (
@@ -327,16 +327,19 @@ export const NotificationCenter: React.FC = () => {
 
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-4 mb-1.5">
-                <span className="text-[13px] font-bold text-white truncate flex-1">{toast.title}</span>
-                <span className="text-[11px] text-zinc-400 shrink-0 whitespace-nowrap">{formatRelativeTime(toast.createdAt)}</span>
+                <span className="text-[13px] font-bold truncate flex-1" style={{ color: '#ffffff' }}>{toast.title}</span>
+                <span className="text-[11px] shrink-0 whitespace-nowrap" style={{ color: '#a1a1aa' }}>{formatRelativeTime(toast.createdAt)}</span>
               </div>
-              <p className="text-xs text-zinc-300 leading-relaxed line-clamp-2">{toast.message}</p>
+              <p className="text-xs leading-relaxed line-clamp-2" style={{ color: '#d4d4d8' }}>{toast.message}</p>
             </div>
 
             <button
               type="button"
               onClick={() => handleDismissToast(toast.id)}
-              className="shrink-0 text-zinc-400 hover:text-white p-1.5 rounded-lg hover:bg-zinc-700/60 transition-colors ml-1"
+              className="shrink-0 p-1.5 rounded-lg hover:bg-zinc-700/60 transition-colors ml-1"
+              style={{ color: '#a1a1aa' }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = '#ffffff')}
+              onMouseLeave={(e) => (e.currentTarget.style.color = '#a1a1aa')}
             >
               <X className="w-4 h-4" />
             </button>
@@ -347,8 +350,8 @@ export const NotificationCenter: React.FC = () => {
       {/* ── Dropdown Menu ── */}
       {isOpen && (
         <div
-          className="absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl shadow-2xl overflow-hidden border border-zinc-700 z-[9999] animate-fadeIn"
-          style={{ backgroundColor: '#0e0e11' }}
+          className="nc-dropdown absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl shadow-2xl overflow-hidden border border-zinc-700 z-[9999] animate-fadeIn"
+          style={{ backgroundColor: '#0e0e11', color: '#ffffff' }}
         >
           {/* Header */}
           <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between" style={{ backgroundColor: '#09090b' }}>
