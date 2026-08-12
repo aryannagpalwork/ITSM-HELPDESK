@@ -1096,6 +1096,15 @@ export const sendChat = async (request: ChatRequest): Promise<ChatResponse> => {
   return await response.json();
 };
 
+export const getChatHistory = async (sessionId: string): Promise<{ session_id: string; conversation_status: string; conversation: any; messages: Array<{ id: string; sender: string; text: string; timestamp: string }> }> => {
+  const response = await apiFetch(`${API_BASE_URL}/chat/history/${encodeURIComponent(sessionId)}`);
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: 'Failed to fetch chat history' }));
+    throw new Error(err.detail || 'Failed to fetch chat history');
+  }
+  return await response.json();
+};
+
 export interface KnowledgeDocument {
   id: number;
   title: string;
