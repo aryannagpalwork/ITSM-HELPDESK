@@ -1,5 +1,6 @@
 """Retriever interface for RAG pipeline."""
 
+import logging
 import re
 import time
 from abc import ABC, abstractmethod
@@ -10,6 +11,8 @@ from typing import Any, Optional
 from app.rag.chunker import DocumentChunk
 from app.rag.vector_store import VectorSearchResult, VectorStore
 from app.rag.embedding_provider import EmbeddingProvider
+
+logger = logging.getLogger(__name__)
 
 
 QUERY_SYNONYMS = {
@@ -119,8 +122,19 @@ def expand_query_variants(query: str) -> list[str]:
             for variant in variant_set:
                 _add(variant)
 
-    # Per-token single-word fallback (kept for robustness).
-    if normalized:
+    # Per-token single-word fallback (kept for robustness) — but ONLY for
+    # genuinely short queries. This fallback exists to help short lookups
+    # like "MFA" or "printer issue" (a handful of meaningful words) become
+    # more findable. For long, structured inputs — like the multi-line
+    # "Original issue / Diagnostic answers / Conversation" blob built during
+    # guided troubleshooting — blindly chopping every word out produces junk
+    # single-word searches ("hi", "the", "can", "you") that waste embedding
+    # calls without helping retrieval. A long input already contains its own
+    # meaningful multi-word phrases (captured above as `base`/`normalized`),
+    # which are far better search candidates than 20+ disconnected words.
+    SHORT_QUERY_WORD_LIMIT = 8
+    normalized_word_count = len(_tokenize(normalized)) if normalized else 0
+    if normalized and normalized_word_count <= SHORT_QUERY_WORD_LIMIT:
         for token in dict.fromkeys(_tokenize(normalized)):
             _add(token)
 
@@ -358,15 +372,41 @@ class FAISSRetriever(Retriever):
 
     def retrieve(self, query: str, config: Optional[RetrievalConfig] = None) -> RetrievedContext:
         """Retrieve relevant context for a query using normalized synonyms, keyword search, and hybrid ranking."""
+        retrieve_start = time.perf_counter()
         effective_config = config or self.config
+
+        expand_start = time.perf_counter()
         query_variants = expand_query_variants(query)
+        expand_ms = round((time.perf_counter() - expand_start) * 1000, 2)
+
+        # Cap the number of variants embedded per query. Query expansion can
+        # legitimately produce 10+ phrasings for topics with many synonyms
+        # (e.g. MFA); embedding all of them individually was the primary
+        # cause of slow chat responses. Capping bounds worst-case latency
+        # regardless of how many synonyms a topic has. The most useful
+        # variants (original query, normalized query, matched synonyms) are
+        # generated first by expand_query_variants, so a cap keeps the
+        # highest-value ones.
+        MAX_QUERY_VARIANTS = 6
+        variant_count_before_cap = len(query_variants)
+        query_variants = query_variants[:MAX_QUERY_VARIANTS]
+
         semantic_results: list[VectorSearchResult] = []
         seen_ids: set[str] = set()
 
-        for variant in query_variants:
-            embedding_result = self.embedding_provider.embed(variant)
+        # Embed all variants in ONE batched call instead of one call per
+        # variant. This was the main fix: N sequential network round-trips
+        # to the embedding provider collapsed into 1. This is the timing
+        # block to watch — it should now be roughly the cost of ONE API
+        # call, not N.
+        embed_start = time.perf_counter()
+        batch_result = self.embedding_provider.embed_batch(query_variants)
+        embed_ms = round((time.perf_counter() - embed_start) * 1000, 2)
+
+        search_start = time.perf_counter()
+        for variant_embedding in batch_result.embeddings:
             candidates = self.vector_store.search(
-                embedding_result.embedding,
+                variant_embedding,
                 # Retrieve a broad candidate pool before hybrid reranking.
                 top_k=max(effective_config.top_k, 20),
                 filter_metadata=effective_config.filter_metadata,
@@ -376,6 +416,7 @@ class FAISSRetriever(Retriever):
                     continue
                 seen_ids.add(candidate.chunk.chunk_id)
                 semantic_results.append(candidate)
+        faiss_search_ms = round((time.perf_counter() - search_start) * 1000, 2)
 
         chunks = list(getattr(self.vector_store, "_chunks", {}).values()) if hasattr(self.vector_store, "_chunks") else []
         keyword_matches = []
@@ -426,8 +467,23 @@ class FAISSRetriever(Retriever):
             for item in filtered[: effective_config.top_k]
         ]
 
+        total_ms = round((time.perf_counter() - retrieve_start) * 1000, 2)
+
         if not results:
-            return RetrievedContext(chunks=[], search_results=[], total_retrieved=0, filter_applied=effective_config.filter_metadata, metadata={"expanded_query": query_variants, "relevance_threshold": effective_config.relevance_threshold, "hybrid_scores": [item["hybrid_score"] for item in ranked]})
+            logger.info(
+                "[retrieve timing] query=%r total=%sms expand=%sms embed=%sms faiss_search=%sms "
+                "variants=%d/%d(before cap) results=0 (below relevance threshold)",
+                query, total_ms, expand_ms, embed_ms, faiss_search_ms,
+                len(query_variants), variant_count_before_cap,
+            )
+            return RetrievedContext(chunks=[], search_results=[], total_retrieved=0, filter_applied=effective_config.filter_metadata, metadata={"expanded_query": query_variants, "relevance_threshold": effective_config.relevance_threshold, "hybrid_scores": [item["hybrid_score"] for item in ranked], "timing_ms": {"total": total_ms, "expand": expand_ms, "embed": embed_ms, "faiss_search": faiss_search_ms}})
+
+        logger.info(
+            "[retrieve timing] query=%r total=%sms expand=%sms embed=%sms faiss_search=%sms "
+            "variants=%d/%d(before cap) results=%d",
+            query, total_ms, expand_ms, embed_ms, faiss_search_ms,
+            len(query_variants), variant_count_before_cap, len(results),
+        )
 
         return RetrievedContext(
             chunks=[result.chunk for result in results],
@@ -442,6 +498,12 @@ class FAISSRetriever(Retriever):
                 "scores": [round(result.metadata.get("hybrid_score", result.similarity_score), 4) for result in results],
                 "candidate_count": len(ranked),
                 "reranked": True,
+                "timing_ms": {
+                    "total": total_ms,
+                    "expand": expand_ms,
+                    "embed": embed_ms,
+                    "faiss_search": faiss_search_ms,
+                },
             },
         )
 

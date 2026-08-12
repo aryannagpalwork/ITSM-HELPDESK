@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useRef, useEffect } from 'react';
 import { useApp } from './AppContext';
 import { ChatMessage, TicketPriority } from './types';
-import { sendChat, escalateToTicket, submitAIChatFeedback } from './api';
+import { sendChat, escalateToTicket, submitAIChatFeedback, getChatHistory } from './api';
 import type { SatisfactionCard } from './types';
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -52,9 +52,9 @@ interface ChatContextType {
   isEscalating: boolean;
   isFeedbackLoading: boolean;
   contentRef: React.RefObject<HTMLDivElement | null>;
-  handleSendPrompt: (text: string) => Promise<void>;
+  handleSendPrompt: (text: string, preserveHistory?: boolean, forceNewSession?: boolean) => Promise<void>;
   handleGuidedYes: () => Promise<void>;
-  handleGuidedNo: () => void;
+  handleGuidedNo: () => Promise<void>;
   handleConvertTicket: () => Promise<void>;
   handleSatisfactionResolved: () => Promise<void>;
   handleSatisfactionCreateTicket: () => Promise<void>;
@@ -65,6 +65,8 @@ const ChatContext = createContext<ChatContextType | undefined>(undefined);
 
 export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { createTicket, loadTickets, isAuthenticated } = useApp();
+
+  const SESSION_STORAGE_KEY = 'copilot_session_id';
 
   const [messages, setMessages] = useState<ChatMessage[]>([WELCOME_MESSAGE]);
   const [input, setInput] = useState('');
@@ -91,6 +93,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setMessages([WELCOME_MESSAGE]);
       setSuggestedTicket(null);
       setSessionId(null);
+      try { sessionStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) { /* ignore */ }
       setCollapsedMessages({});
       setActiveSatisfactionCard(null);
       setConversationStatus('ACTIVE');
@@ -101,6 +104,84 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     wasAuthenticated.current = isAuthenticated;
   }, [isAuthenticated]);
+
+  // On mount, attempt to restore session from sessionStorage. If there is an
+  // in-flight assistant response (last message is user without assistant reply)
+  // poll the history endpoint until the assistant message appears.
+  useEffect(() => {
+    let pollId: number | null = null;
+    let pollTimeout: number | null = null;
+
+    const tryRestore = async (storedId: string) => {
+      try {
+        const resp = await getChatHistory(storedId);
+        const msgs = (resp.messages || []).map(m => ({ id: String(m.id || `${m.sender}_${Date.now()}`), sender: m.sender as 'user' | 'assistant' | 'system', text: m.text, timestamp: m.timestamp } as ChatMessage));
+        // If there are no messages, keep welcome message.
+        if (msgs.length > 0) setMessages(msgs as ChatMessage[]);
+        setSessionId(resp.session_id || storedId);
+        if (resp.conversation_status) setConversationStatus(resp.conversation_status as ConversationStatus || 'ACTIVE');
+
+        // Detect in-flight: last message from user with no assistant after it
+        const last = resp.messages && resp.messages.length ? resp.messages[resp.messages.length - 1] : null;
+        const lastIsUser = last && last.sender === 'user';
+        const hasAssistantAfter = resp.messages && resp.messages.some((m: any, idx: number) => m.sender === 'assistant' && idx > (resp.messages.length - 1));
+
+        if (lastIsUser && !hasAssistantAfter) {
+          setIsTyping(true);
+          setTypingText('AI is responding...');
+
+          const startLen = resp.messages.length;
+          const start = Date.now();
+
+          pollId = window.setInterval(async () => {
+            try {
+              const updated = await getChatHistory(storedId);
+              const updatedMsgs = updated.messages || [];
+              // Find first assistant message after startLen
+              if (updatedMsgs.length > startLen) {
+                const newAssistant = updatedMsgs.slice(startLen).find((m: any) => m.sender === 'assistant');
+                if (newAssistant) {
+                  // append assistant message with typing animation
+                  setIsTyping(false);
+                  simulateTyping(newAssistant.text, `bot_${Date.now()}`);
+                  if (pollId) { window.clearInterval(pollId); pollId = null; }
+                  if (pollTimeout) { window.clearTimeout(pollTimeout); pollTimeout = null; }
+                }
+              }
+              // Stop polling after 60s
+              if (Date.now() - start > 60000) {
+                if (pollId) { window.clearInterval(pollId); pollId = null; }
+                setIsTyping(false);
+                setTypingText('');
+              }
+            } catch (err) {
+              console.error('[Restore Poll] failed to fetch history', err);
+            }
+          }, 2000);
+
+          pollTimeout = window.setTimeout(() => {
+            if (pollId) { window.clearInterval(pollId); pollId = null; }
+            setIsTyping(false);
+            setTypingText('');
+          }, 61000);
+        }
+      } catch (err) {
+        console.error('[Session Restore] failed:', err);
+      }
+    };
+
+    try {
+      const stored = sessionStorage.getItem(SESSION_STORAGE_KEY);
+      if (stored) tryRestore(stored);
+    } catch (e) {
+      /* ignore sessionStorage errors */
+    }
+
+    return () => {
+      if (pollId) window.clearInterval(pollId);
+      if (pollTimeout) window.clearTimeout(pollTimeout);
+    };
+  }, []);
 
   const simulateTyping = async (text: string, msgId: string) => {
     setTypingText('');
@@ -128,7 +209,11 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     typeChar();
   };
 
-  const handleSendPrompt = async (textToSend: string) => {
+  const handleSendPrompt = async (
+    textToSend: string,
+    preserveHistory: boolean = true,
+    forceNewSession: boolean = false,
+  ) => {
     if (!textToSend.trim()) return;
 
     const userMsg: ChatMessage = {
@@ -143,20 +228,23 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsTyping(true);
 
     try {
-      const chatHistory = messages.map(msg => ({
-        role: msg.sender === 'user' ? 'user' : 'assistant',
-        content: msg.text,
-      }));
+      const chatHistory = preserveHistory
+        ? messages.map(msg => ({
+            role: msg.sender === 'user' ? 'user' : 'assistant',
+            content: msg.text,
+          }))
+        : [];
 
       const response = await sendChat({
         query: textToSend,
         top_k: 5,
         similarity_threshold: 0.0,
         chat_history: chatHistory,
-        session_id: sessionId,
+        session_id: forceNewSession ? null : sessionId,
       });
 
       setSessionId(response.session_id);
+      try { if (response.session_id) sessionStorage.setItem(SESSION_STORAGE_KEY, response.session_id); } catch (e) { /* ignore */ }
       if (response.guided_state === 'RESOLVED') {
         await loadTickets();
       }
@@ -164,7 +252,11 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setGuidedActions(response.guided_actions || []);
       setGuidedState(response.guided_state || null);
 
-      if (!response.guided_state && response.satisfaction_card?.show && !activeSatisfactionCard) {
+      if (response.guided_state === 'RESOLVED') {
+        setConversationStatus('RESOLVED');
+        setActiveSatisfactionCard(null);
+        setSuggestedTicket(prev => prev ? { ...prev, resolvedByAI: true } : prev);
+      } else if (!response.guided_state && response.satisfaction_card?.show && !activeSatisfactionCard) {
         setActiveSatisfactionCard(response.satisfaction_card);
         if (response.satisfaction_card.reason === 'POSITIVE_TREND') {
           setConversationStatus('LIKELY_RESOLVED');
@@ -240,9 +332,20 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const handleGuidedNo = () => {
-    setActiveSatisfactionCard(null);
-    handleSendPrompt('No');
+  const handleGuidedNo = async () => {
+    if (!sessionId || isFeedbackLoading) return;
+    setIsFeedbackLoading(true);
+    try {
+      try {
+        await submitAIChatFeedback(sessionId, 'negative');
+      } catch (error) {
+        console.error('[Guided No Feedback] Failed:', error);
+      }
+      setActiveSatisfactionCard(null);
+      await handleSendPrompt('No');
+    } finally {
+      setIsFeedbackLoading(false);
+    }
   };
 
   const handleConvertTicket = async () => {
@@ -295,7 +398,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       setConversationStatus('RESOLVED');
       setActiveSatisfactionCard(null);
-      const resolvedMsg = 'Thank you for the update. I’m glad I could help — feel free to reach out any time.';
+      const resolvedMsg = 'Thanks for confirming. Your issue has been marked as Resolved by AI.';
       setMessages(prev => [...prev, { id: `assist_${Date.now()}`, sender: 'assistant', text: resolvedMsg, timestamp: new Date().toISOString() }]);
     } catch (error) {
       console.error('[Satisfaction Feedback] Failed:', error);
@@ -363,6 +466,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setConversationStatus('ACTIVE');
     setGuidedActions([]);
     setGuidedState(null);
+    try { sessionStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) { /* ignore */ }
   };
 
   return (

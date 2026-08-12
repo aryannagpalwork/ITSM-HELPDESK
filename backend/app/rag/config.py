@@ -119,7 +119,7 @@ def get_rag_settings() -> RAGSettings:
         vector_store_path=Path(os.getenv("VECTOR_STORE_PATH", str(BASE_DIR / "backend" / "vector_store"))),
         top_k=int(os.getenv("TOP_K", "5")),
         similarity_threshold=float(os.getenv("SIMILARITY_THRESHOLD", "0.5")),
-        relevance_threshold=float(os.getenv("RELEVANCE_THRESHOLD", "0.55")),
+        relevance_threshold=float(os.getenv("RELEVANCE_THRESHOLD", "0.35")),
         llm_provider=os.getenv("LLM_PROVIDER", "openai"),
         llm_model=os.getenv("LLM_MODEL", "gpt-4"),
         llm_temperature=float(os.getenv("LLM_TEMPERATURE", "0.7")),
