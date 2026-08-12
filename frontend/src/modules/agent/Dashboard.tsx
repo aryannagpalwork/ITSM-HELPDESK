@@ -465,7 +465,7 @@ export const AgentDashboard: React.FC = () => {
 
   return (
     <div 
-      className="flex-1 p-6 overflow-y-auto h-full font-sans"
+      className="agent-dashboard flex-1 p-6 overflow-y-auto h-full font-sans"
       style={{ backgroundColor: tokens.appBg, color: tokens.textPrimary }}
     >
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
