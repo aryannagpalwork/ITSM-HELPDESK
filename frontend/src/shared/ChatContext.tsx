@@ -356,16 +356,9 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setActiveSatisfactionCard(null);
         setPendingSatisfactionCard(null);
         setSuggestedTicket(prev => prev ? { ...prev, resolvedByAI: true } : prev);
-<<<<<<< Updated upstream
       } else if (!response.guided_state && response.satisfaction_card?.show && !activeSatisfactionCard && !pendingSatisfactionCard) {
         // Store in pending state; it will be shown after typing completes
         setPendingSatisfactionCard(response.satisfaction_card);
-=======
-      } else if (!response.guided_state && response.satisfaction_card?.show && !activeSatisfactionCard) {
-        setActiveSatisfactionCard(response.satisfaction_card);
-        setCurrentIssueShownSatisfaction(true);
-        setConversationStatus('AWAITING_SATISFACTION');
->>>>>>> Stashed changes
       }
 
       simulateTyping(response.answer, `bot_${Date.now()}`);

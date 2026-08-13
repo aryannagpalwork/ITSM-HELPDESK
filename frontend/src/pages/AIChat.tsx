@@ -669,15 +669,15 @@ export const AIChat: React.FC = () => {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onInput={autoResize}
-<<<<<<< Updated upstream
                 disabled={isProcessing || isTyping || isConversationEnded()}
                 onKeyDown={(e) => {
-                  if (!isProcessing && !isTyping && !isConversationEnded() && e.key === 'Enter' && !e.shiftKey) {
-=======
-                disabled={isProcessing || isTyping || ticketCreatedForIssue || currentIssueResolved}
-                onKeyDown={(e) => {
-                  if (!isProcessing && !isTyping && !ticketCreatedForIssue && !currentIssueResolved && e.key === 'Enter' && !e.shiftKey) {
->>>>>>> Stashed changes
+                  if (
+                    !isProcessing &&
+                    !isTyping &&
+                    !isConversationEnded() &&
+                    e.key === 'Enter' &&
+                    !e.shiftKey
+                  ) {
                     e.preventDefault();
                     handleSendPromptWrapper(input);
                   }
@@ -688,11 +688,7 @@ export const AIChat: React.FC = () => {
               />
               <button 
                 onClick={() => handleSendPromptWrapper(input)}
-<<<<<<< Updated upstream
                 disabled={isProcessing || isTyping || isConversationEnded()}
-=======
-                disabled={isProcessing || isTyping || ticketCreatedForIssue || currentIssueResolved}
->>>>>>> Stashed changes
                 className="p-2 rounded-xl transition-all shrink-0 cursor-pointer ml-2"
                 style={{ backgroundColor: tokens.accentPrimary, color: 'var(--accent-primary-contrast)' }}
                 onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.9'; }}
