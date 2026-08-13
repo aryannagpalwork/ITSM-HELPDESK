@@ -839,6 +839,7 @@ async def list_tickets(
     assigned_to: str | None,
     assigned_team: str | None,
     created_by: str | None,
+    resolution_source: str | None,
     sort_by: TicketSortField,
     sort_order: SortOrder,
     current_user: dict,
@@ -880,7 +881,32 @@ async def list_tickets(
     
     if created_by:
         query["created_by"] = created_by
-    
+
+    if resolution_source:
+        normalized_resolution_source = resolution_source.strip().lower()
+        resolution_query: dict | None = None
+        if normalized_resolution_source == "ai":
+            resolution_query = {
+                "$or": [
+                    {"resolved_by": "AI"},
+                    {"resolution_source": "AI"},
+                    {"ai_resolved": True},
+                ]
+            }
+        elif normalized_resolution_source == "agent":
+            resolution_query = {
+                "$and": [
+                    {"status": {"$in": ["Resolved", "Closed"]}},
+                    {"$or": [
+                        {"resolved_by": {"$ne": "AI"}},
+                        {"resolution_source": {"$ne": "AI"}},
+                        {"ai_resolved": {"$ne": True}},
+                    ]},
+                ]
+            }
+        if resolution_query:
+            query = {"$and": [query, resolution_query]} if query else resolution_query
+
     # Apply role-based filtering
     if current_user["internal_role"] == "end_user":
         query["created_by"] = current_user["id"]

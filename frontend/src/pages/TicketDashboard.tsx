@@ -35,6 +35,7 @@ export const TicketDashboard: React.FC = () => {
   const [search, setSearch] = useState(() => searchParams.get('search') ?? '');
   const [statusFilter, setStatusFilter] = useState<string>(() => searchParams.get('status') ?? 'all');
   const [priorityFilter, setPriorityFilter] = useState<string>(() => searchParams.get('priority') ?? 'all');
+  const [resolutionSourceFilter, setResolutionSourceFilter] = useState<string>(() => searchParams.get('resolution_source') ?? 'all');
   const [slaFilter] = useState<string>(() => searchParams.get('sla') ?? 'all');
   const [sortBy, setSortBy] = useState<string>('newest');
   const ticketView = searchParams.get('view') ?? 'all';
@@ -61,6 +62,7 @@ export const TicketDashboard: React.FC = () => {
     setSearch(searchParams.get('search') ?? '');
     setStatusFilter(searchParams.get('status') ?? 'all');
     setPriorityFilter(searchParams.get('priority') ?? 'all');
+    setResolutionSourceFilter(searchParams.get('resolution_source') ?? 'all');
   }, [searchParams]);
 
   // New Request Form State (within dashboard)
@@ -77,9 +79,10 @@ export const TicketDashboard: React.FC = () => {
       // records are not removed by the API status filter.
       status: ticketView === 'resolved' ? 'all' : statusFilter,
       priority: priorityFilter,
+      resolutionSource: resolutionSourceFilter === 'all' ? undefined : (resolutionSourceFilter as 'agent' | 'ai'),
       sortBy,
     });
-  }, [search, statusFilter, priorityFilter, sortBy, ticketView]);
+  }, [search, statusFilter, priorityFilter, resolutionSourceFilter, sortBy, ticketView]);
 
   // Filter logic
   const filteredTickets = tickets.filter(ticket => {
@@ -102,7 +105,6 @@ export const TicketDashboard: React.FC = () => {
 
     // Priority filter match
     const matchesPriority = priorityFilter === 'all' || ticket.priority === priorityFilter;
-
     const ticketText = `${ticket.title} ${ticket.description} ${ticket.category || ''}`.toLowerCase();
     const awaitingResponse = ticket.status === 'waiting_for_user_response'
       || ticket.awaitingCustomerResponse === true
