@@ -130,6 +130,30 @@ async def _notify_agent_employee_response(db: AsyncIOMotorDatabase, ticket: dict
     })
 
 
+async def _notify_employee_for_agent_response(db: AsyncIOMotorDatabase, ticket: dict, actor: dict | None = None) -> None:
+    """Use the existing notification system to ask the employee for a response."""
+    requester_id = ticket.get("created_by")
+    if not requester_id:
+        return
+
+    requester = await db.users.find_one({"_id": requester_id, "deleted": {"$ne": True}})
+    if not requester or requester.get("role") not in {"end_user", "employee"}:
+        return
+
+    ticket_number = ticket.get("ticket_number") or ticket.get("_id")
+    actor_name = (actor or {}).get("full_name") or "An agent"
+    await db.notifications.insert_one({
+        "_id": str(uuid4()),
+        "user_id": requester_id,
+        "type": "ticket.response",
+        "ticket_id": ticket["_id"],
+        "title": f"Ticket #{ticket_number} needs your response",
+        "message": f"{actor_name} has updated ticket #{ticket_number}. Your response is required.",
+        "read": False,
+        "created_at": datetime.utcnow(),
+    })
+
+
 async def _notify_assignment(db: AsyncIOMotorDatabase, ticket: dict, agent: dict, *, is_reassignment: bool = False) -> None:
     """Persist assignment notifications for the agent and requester.
 
@@ -459,9 +483,11 @@ async def add_comment(
     )
 
     # Auto-transition: awaiting_user_response → in_progress when employee sends non-internal comment
-    # and notify the assigned agent
+    # and notify the assigned agent. For agent/admin responses, move the ticket back to a waiting state
+    # and notify the requester using the existing notification mechanism.
     current_user = await db.users.find_one({"_id": current_user_id})
     is_employee = current_user and current_user.get("role") in ("end_user", "employee")
+    is_agent_or_admin = current_user and current_user.get("role") in ("agent", "admin")
     if is_employee and not is_internal and ticket.get("status") == "Waiting for User Response":
         await db.tickets.update_one(
             {"_id": ticket_id},
@@ -477,6 +503,21 @@ async def add_comment(
             reason="Employee responded — status moved back to In Progress",
         )
         await _notify_agent_employee_response(db, ticket)
+    elif not is_internal and is_agent_or_admin:
+        await db.tickets.update_one(
+            {"_id": ticket_id},
+            {"$set": {"status": "Waiting for User Response", "updated_at": now}},
+        )
+        await _write_audit(
+            db,
+            action="ticket.status_changed",
+            user_id=current_user_id,
+            ticket_id=ticket_id,
+            field="status",
+            new_value="Waiting for User Response",
+            reason="Agent/Admin response posted — waiting for employee response",
+        )
+        await _notify_employee_for_agent_response(db, {**ticket, "status": "Waiting for User Response"}, current_user)
 
     # Return serialized comment
     author = current_user
