@@ -2,7 +2,7 @@ from typing import Annotated, Optional
 from datetime import datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi import Depends
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
@@ -10,7 +10,6 @@ from pydantic import BaseModel, Field
 from app.api.deps import DatabaseSession
 from app.auth.dependencies import get_current_user, require_roles
 from app.schemas.ticket import (
-    CommentCreate,
     SortOrder,
     TicketCommentRead,
     TicketCreate,
@@ -20,16 +19,14 @@ from app.schemas.ticket import (
     TicketUpdate,
     TicketAnalyzeRequest,
     TicketAnalyzeResponse,
-    TicketDuplicateRequest,
-    TicketDuplicateResponse,
 )
 from app.schemas.audit_log import AuditLogRead
 from app.services.tickets import (
     add_comment,
     create_ticket,
     delete_ticket,
-    find_duplicate_ticket,
     get_ticket,
+    get_comment_attachment,
     list_tickets,
     update_ticket,
     assign_ticket,
@@ -149,30 +146,6 @@ class UpdateTicketRequest(BaseModel):
     reason: str | None = None
 
 
-@router.post("/check-duplicate", response_model=TicketDuplicateResponse, status_code=status.HTTP_200_OK)
-async def check_duplicate_ticket_endpoint(
-    payload: TicketDuplicateRequest,
-    db: DatabaseSession,
-    current_user: dict = Depends(get_current_user),
-) -> TicketDuplicateResponse:
-    """Check whether a ticket has an exact or likely duplicate in the recent ticket history."""
-    duplicate = await find_duplicate_ticket(db, payload.title, payload.description, current_user["id"])
-    if not duplicate:
-        return TicketDuplicateResponse(status="none", similarity_score=0.0, ticket=None, message="No duplicate detected.")
-
-    return TicketDuplicateResponse(
-        status=duplicate["duplicate_status"],
-        similarity_score=duplicate["similarity_score"],
-        ticket={
-            "id": duplicate["id"],
-            "ticket_number": duplicate["ticket_number"],
-            "title": duplicate["title"],
-            "status": duplicate["status"],
-        },
-        message="An existing ticket appears to match this report.",
-    )
-
-
 @router.post("", response_model=TicketRead, status_code=status.HTTP_201_CREATED)
 async def create_ticket_endpoint(
     payload: TicketCreate,
@@ -183,8 +156,6 @@ async def create_ticket_endpoint(
     """Create a new incident ticket with an automatically generated ticket number."""
     if payload.created_by is None:
         payload.created_by = current_user["id"]
-    if payload.duplicate_of_ticket_id and payload.duplicate_status:
-        payload.duplicate_similarity_score = float(payload.duplicate_similarity_score or 0.0)
     return await create_ticket(db, payload, reason, current_user)
 
 
@@ -295,18 +266,51 @@ async def get_ticket_audit_logs_endpoint(
 @router.post("/{ticket_id}/comments", response_model=TicketCommentRead, status_code=status.HTTP_201_CREATED)
 async def add_comment_endpoint(
     ticket_id: str,
-    payload: CommentCreate,
+    request: Request,
     db: DatabaseSession,
     current_user: dict = Depends(get_current_user),
 ) -> TicketCommentRead:
     """Add a comment or internal note to a ticket. Visible in lifecycle timeline."""
+    content_type = (request.headers.get("content-type") or "").lower()
+    content: str
+    is_internal: bool
+    attachment = None
+
+    if content_type.startswith("multipart/form-data"):
+        form = await request.form()
+        content = str(form.get("content") or "").strip()
+        raw_internal = form.get("is_internal", "false")
+        is_internal = str(raw_internal).lower() in {"1", "true", "yes", "on"}
+        attachment_candidate = form.get("attachment")
+        if hasattr(attachment_candidate, "filename"):
+            attachment = attachment_candidate
+    else:
+        payload = await request.json()
+        content = str(payload.get("content") or "").strip()
+        is_internal = bool(payload.get("is_internal", False))
+
+    if not content and attachment is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="content: Field required")
+
     return await add_comment(
         db,
         ticket_id=ticket_id,
-        content=payload.content,
-        is_internal=payload.is_internal,
+        content=content,
+        is_internal=is_internal,
         current_user_id=current_user["id"],
+        attachment=attachment,
     )
+
+
+@router.get("/{ticket_id}/comments/{comment_id}/attachment")
+async def get_comment_attachment_endpoint(
+    ticket_id: str,
+    comment_id: str,
+    db: DatabaseSession,
+    current_user: dict = Depends(get_current_user),
+):
+    """Download an image attachment for a ticket comment."""
+    return await get_comment_attachment(db, ticket_id, comment_id, current_user)
 
 
 @router.patch("/{ticket_id}", response_model=TicketRead)

@@ -1,12 +1,12 @@
 from datetime import datetime, timedelta
-from difflib import SequenceMatcher
 from math import ceil
 import json
 import logging
-import re
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import HTTPException, status
+from fastapi import UploadFile
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.config.settings import get_settings
@@ -27,6 +27,10 @@ from app.services.sla import calculate_sla, snapshot_for_ticket
 
 ACTIVE_TICKET_STATUSES = {"Open", "In Progress", "Waiting for User Response"}
 DEFAULT_AGENT_CAPACITY = 10
+UPLOAD_DIR = Path(__file__).parent.parent.parent / "uploads"
+ALLOWED_COMMENT_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+ALLOWED_COMMENT_IMAGE_CONTENT_TYPES = {"image/png", "image/jpeg", "image/webp"}
+MAX_COMMENT_IMAGE_BYTES = 5 * 1024 * 1024
 
 # Legacy/imported records may use workflow labels that are not part of the
 # public TicketStatus enum. Keep the API contract stable by mapping those
@@ -318,144 +322,6 @@ def get_team_from_category(ai_category: str | None) -> str | None:
     return None
 
 
-def normalize_ticket_text(value: str | None) -> str:
-    """Normalize ticket text for duplicate and similarity comparisons."""
-    if not value:
-        return ""
-    text = str(value).lower()
-    replacements = {
-        "can't": "cannot",
-        "cant": "cannot",
-        "won't": "will not",
-        "doesn't": "does not",
-        "didn't": "did not",
-        "login": "login",
-        "log in": "login",
-        "logged in": "login",
-        "vpn": "vpn",
-        "virtual private network": "vpn",
-        "v p n": "vpn",
-        "workstation": "laptop",
-        "desktop": "laptop",
-        "computer": "laptop",
-        "laptop": "laptop",
-        "corporate": "company",
-        "company": "company",
-        "unable": "cannot",
-        "can't access": "cannot access",
-        "cannot access": "cannot access",
-        "issue": "issue",
-    }
-    for source, target in replacements.items():
-        text = text.replace(source, target)
-
-    text = re.sub(r"[^a-z0-9]+", " ", text)
-    tokens = [token for token in text.split() if token not in {"the", "a", "an", "my", "to", "on", "of", "for", "is", "are", "be", "in", "it", "from", "and", "with", "at", "by", "this", "that", "our", "your", "me"}]
-    return re.sub(r"\s+", " ", " ".join(tokens)).strip()
-
-
-def _token_set(value: str | None) -> set[str]:
-    return set(normalize_ticket_text(value).split())
-
-
-def ticket_similarity_score(
-    title: str | None,
-    description: str | None,
-    existing_title: str | None = None,
-    existing_description: str | None = None,
-) -> float:
-    """Return a 0.0-1.0 similarity score for ticket comparison."""
-    if existing_title is None and existing_description is None:
-        left_text = normalize_ticket_text(title)
-        right_text = normalize_ticket_text(description)
-        if not left_text or not right_text:
-            return 0.0
-        if left_text == right_text:
-            return 1.0
-        return round(max(0.0, min(1.0, SequenceMatcher(None, left_text, right_text).ratio())), 4)
-
-    new_text = normalize_ticket_text(f"{title or ''} {description or ''}")
-    old_text = normalize_ticket_text(f"{existing_title or ''} {existing_description or ''}")
-    if not new_text or not old_text:
-        return 0.0
-    if new_text == old_text:
-        return 1.0
-
-    new_tokens = _token_set(new_text)
-    old_tokens = _token_set(old_text)
-    if not new_tokens or not old_tokens:
-        return 0.0
-
-    token_overlap = len(new_tokens & old_tokens) / max(len(new_tokens | old_tokens), 1)
-    title_similarity = SequenceMatcher(None, normalize_ticket_text(title), normalize_ticket_text(existing_title)).ratio()
-    description_similarity = SequenceMatcher(None, normalize_ticket_text(description), normalize_ticket_text(existing_description)).ratio()
-    combined_similarity = SequenceMatcher(None, new_text, old_text).ratio()
-    similarity_boost = 0.2 if {"vpn", "laptop"}.issubset(new_tokens & old_tokens) else 0.0
-
-    score = max(
-        combined_similarity,
-        0.55 * title_similarity + 0.45 * description_similarity,
-        0.5 * combined_similarity + 0.5 * token_overlap,
-        min(1.0, token_overlap + similarity_boost),
-    )
-    return round(max(0.0, min(1.0, score)), 4)
-
-
-def classify_duplicate_match(score: float, title: str | None = None, description: str | None = None) -> str:
-    """Classify a comparison as exact, possible, or none."""
-    if score >= 0.98:
-        return "exact"
-    if score >= 0.6:
-        return "possible"
-    return "none"
-
-
-async def find_duplicate_ticket(
-    db: AsyncIOMotorDatabase,
-    title: str,
-    description: str,
-    created_by: str | None = None,
-    limit: int = 200,
-) -> dict | None:
-    """Look for the most likely duplicate ticket among recent tickets."""
-    filters: dict = {}
-    if created_by:
-        filters["created_by"] = created_by
-    cursor = db.tickets.find(filters, {
-        "_id": 1,
-        "ticket_number": 1,
-        "title": 1,
-        "description": 1,
-        "status": 1,
-        "created_by": 1,
-        "created_at": 1,
-    }).sort([("created_at", -1)]).limit(limit)
-    candidates = await cursor.to_list(length=limit)
-
-    best_match: dict | None = None
-    best_score = 0.0
-    for ticket in candidates:
-        if ticket.get("_id") is None:
-            continue
-        text_score = ticket_similarity_score(title, description, ticket.get("title"), ticket.get("description"))
-        if text_score > best_score:
-            best_score = text_score
-            best_match = {
-                "id": ticket.get("_id"),
-                "ticket_number": ticket.get("ticket_number"),
-                "title": ticket.get("title"),
-                "description": ticket.get("description"),
-                "status": normalize_ticket_status(ticket.get("status")),
-                "similarity_score": text_score,
-            }
-
-    if not best_match or best_score < 0.6:
-        return None
-
-    best_match["duplicate_status"] = classify_duplicate_match(best_score, title, description)
-    return best_match
-
-
 async def _generate_ticket_number(db: AsyncIOMotorDatabase) -> str:
     year = datetime.utcnow().year
     prefix = f"INC-{year}-"
@@ -504,12 +370,53 @@ async def _write_audit(
     await db.audit_logs.insert_one(audit_log)
 
 
+async def _store_comment_attachment(
+    comment_id: str,
+    ticket_id: str,
+    attachment: UploadFile,
+) -> dict:
+    raw_filename = attachment.filename or f"ticket-attachment-{comment_id}"
+    filename = Path(raw_filename).name
+    ext = Path(filename).suffix.lower()
+    content_type = (attachment.content_type or "").lower()
+    if ext not in ALLOWED_COMMENT_IMAGE_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported attachment type. Only PNG, JPG, JPEG, and WEBP are allowed.",
+        )
+    if content_type not in ALLOWED_COMMENT_IMAGE_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported attachment content type. Only PNG, JPG, JPEG, and WEBP are allowed.",
+        )
+
+    content = await attachment.read()
+    if len(content) > MAX_COMMENT_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Attachment exceeds the 5 MB limit.",
+        )
+
+    saved_filename = f"{ticket_id}_{comment_id}_{uuid4().hex}_{filename}"
+    file_path = UPLOAD_DIR / saved_filename
+    UPLOAD_DIR.mkdir(exist_ok=True)
+    file_path.write_bytes(content)
+
+    return {
+        "attachment_filename": filename,
+        "attachment_file_path": saved_filename,
+        "attachment_content_type": content_type,
+        "attachment_size": len(content),
+    }
+
+
 async def add_comment(
     db: AsyncIOMotorDatabase,
     ticket_id: str,
     content: str,
     is_internal: bool,
     current_user_id: str,
+    attachment: UploadFile | None = None,
 ) -> TicketCommentRead:
     """Persist a comment and write an audit-log entry for the timeline."""
     from app.schemas.ticket import TicketCommentRead as TCR
@@ -528,6 +435,9 @@ async def add_comment(
         "is_internal": is_internal,
         "created_at": now,
     }
+    if attachment is not None and attachment.filename:
+        attachment_data = await _store_comment_attachment(comment_id, ticket_id, attachment)
+        comment_doc.update(attachment_data)
     await db.ticket_comments.insert_one(comment_doc)
 
     # Link comment to ticket
@@ -578,6 +488,9 @@ async def add_comment(
         author_role=author.get("role") if author else None,
         content=content,
         is_internal=is_internal,
+        attachment_filename=comment_doc.get("attachment_filename"),
+        attachment_content_type=comment_doc.get("attachment_content_type"),
+        attachment_size=comment_doc.get("attachment_size"),
         created_at=now,
     )
 
@@ -594,7 +507,36 @@ async def _serialize_comment(comment: dict, db: AsyncIOMotorDatabase) -> TicketC
         author_role=author.get("role") if author else None,
         content=comment["content"],
         is_internal=comment["is_internal"],
+        attachment_filename=comment.get("attachment_filename"),
+        attachment_content_type=comment.get("attachment_content_type"),
+        attachment_size=comment.get("attachment_size"),
         created_at=comment["created_at"],
+    )
+
+
+async def get_comment_attachment(
+    db: AsyncIOMotorDatabase,
+    ticket_id: str,
+    comment_id: str,
+    current_user: dict,
+):
+    await get_ticket(db, ticket_id, current_user)
+    comment = await db.ticket_comments.find_one({"_id": comment_id, "ticket_id": ticket_id})
+    if comment is None or not comment.get("attachment_file_path"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found.")
+    if current_user.get("internal_role") == "end_user" and comment.get("is_internal"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
+
+    file_path = UPLOAD_DIR / comment["attachment_file_path"]
+    if not file_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment file not found.")
+
+    from fastapi.responses import FileResponse
+
+    return FileResponse(
+        path=file_path,
+        filename=comment.get("attachment_filename") or file_path.name,
+        media_type=comment.get("attachment_content_type") or "application/octet-stream",
     )
 
 
@@ -737,9 +679,6 @@ async def create_ticket(db: AsyncIOMotorDatabase, payload: TicketCreate, reason:
         "matched_specialization": None,
         "assigned_team": assigned_team,
         "created_by": created_by_id,
-        "duplicate_of_ticket_id": payload.duplicate_of_ticket_id,
-        "duplicate_status": payload.duplicate_status,
-        "duplicate_similarity_score": payload.duplicate_similarity_score,
         "ai_summary": payload.ai_summary,
         "resolution": payload.resolution,
         "resolved_by": payload.resolved_by,
