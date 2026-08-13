@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '../shared/AppContext';
 import { AgentAvailability, Ticket, TicketPriority, TicketStatus } from '../shared/types';
@@ -69,6 +68,7 @@ export const TicketDetails: React.FC = () => {
   });
   const [agents, setAgents] = useState<AgentAvailability[]>([]);
   const [fetchedTicket, setFetchedTicket] = useState<Ticket | null>(null);
+  const [isTicketLoading, setIsTicketLoading] = useState(true);
   const [draftStatus, setDraftStatus] = useState<TicketStatus | null>(null);
   const [draftPriority, setDraftPriority] = useState<TicketPriority | null>(null);
   const [draftResolution, setDraftResolution] = useState<string | undefined>();
@@ -79,16 +79,37 @@ export const TicketDetails: React.FC = () => {
   const ticket = tickets.find((t) => t.id === id) || fetchedTicket;
 
   useEffect(() => {
-    if (ticket || !id) return;
     let active = true;
+
+    if (!id) {
+      setIsTicketLoading(false);
+      return;
+    }
+
+    if (ticket) {
+      setIsTicketLoading(false);
+      return;
+    }
+
+    setIsTicketLoading(true);
+
     getTicket(id)
       .then((loaded) => {
-        if (active) setFetchedTicket(loaded);
+        if (!active) return;
+        setFetchedTicket(loaded);
       })
-      .catch(() => {
-        if (active) setFetchedTicket(null);
+      .catch((error) => {
+        console.error('Unable to load ticket:', error);
+        if (!active) return;
+        setFetchedTicket(null);
+      })
+      .finally(() => {
+        if (active) setIsTicketLoading(false);
       });
-    return () => { active = false; };
+
+    return () => {
+      active = false;
+    };
   }, [id, ticket?.id]);
 
   useEffect(() => {
@@ -111,32 +132,15 @@ export const TicketDetails: React.FC = () => {
     }
   }, [toast]);
 
-  if (!ticket) {
-    return (
-      <div className="flex-1 bg-app p-8 flex flex-col items-center justify-center h-full font-sans">
-        <AlertTriangle className="w-12 h-12 text-rose-500 mb-3" />
-        <h2 className="text-sm font-bold text-primary">Incident Record Not Found</h2>
-        <p className="text-xs text-tertiary mt-1 max-w-sm text-center">
-          The incident ticket you are trying to access does not exist or has been removed from the database.
-        </p>
-        <button
-          onClick={() => {
-            if (currentUser.role === 'Agent') navigate('/agent/tickets');
-            else if (currentUser.role === 'Administrator') navigate('/admin/tickets');
-            else navigate('/tickets');
-          }}
-          className="mt-6 px-4 py-2 bg-card-solid border border-token rounded-lg text-xs font-semibold text-secondary hover-text transition-all cursor-pointer"
-        >
-          Return to Queue
-        </button>
-      </div>
-    );
-  }
+  // Filter Comments: Normal users cannot see internal notes.
+  // Keep this hook-safe by deriving an empty list until the ticket has loaded.
+  const filteredComments = useMemo(() => {
+    if (!ticket) return [];
 
-  // Filter Comments: Normal users cannot see internal notes!
-  const filteredComments = comments
-    .filter((c) => c.ticketId === ticket.id)
-    .filter((c) => currentUser.role !== 'Employee' || !c.isInternal);
+    return comments
+      .filter((c) => c.ticketId === ticket.id)
+      .filter((c) => currentUser.role !== 'Employee' || !c.isInternal);
+  }, [comments, ticket?.id, currentUser.role]);
 
   useEffect(() => {
     if (!selectedAttachment) {
@@ -224,12 +228,6 @@ export const TicketDetails: React.FC = () => {
     };
   }, []);
 
-  const displayedStatus = draftStatus ?? ticket.status;
-  const displayedPriority = draftPriority ?? ticket.priority;
-  const lifecycleDirty = displayedStatus !== ticket.status
-    || displayedPriority !== ticket.priority
-    || draftResolution !== undefined;
-
   const validateSelectedAttachment = (file: File): string | null => {
     const extension = file.name.split('.').pop()?.toLowerCase() || '';
     const mimeType = file.type.toLowerCase();
@@ -280,7 +278,7 @@ export const TicketDetails: React.FC = () => {
   };
 
   const handleSaveLifecycle = async () => {
-    if (!lifecycleDirty) return;
+    if (!ticket || !lifecycleDirty) return;
     setLoading('save-lifecycle');
     try {
       const updates: Partial<Ticket> = { status: displayedStatus };
@@ -347,6 +345,7 @@ export const TicketDetails: React.FC = () => {
   };
 
   const handleDelete = () => {
+    if (!ticket) return;
     if (confirm('Are you absolutely sure you want to permanently delete this support incident?')) {
       deleteTicket(ticket.id);
       // Return to role-specific ticket queue
@@ -508,6 +507,46 @@ export const TicketDetails: React.FC = () => {
   };
 
   const canEditMetadata = currentUser.role !== 'Employee';
+
+  // All hooks above must run on every render. Only decide what to display after
+  // the complete hook block so refreshes cannot change hook order.
+  if (isTicketLoading) {
+    return (
+      <div className="flex-1 bg-app p-8 flex flex-col items-center justify-center h-full font-sans">
+        <Loader2 className="w-6 h-6 text-accent animate-spin mb-3" />
+        <p className="text-xs text-secondary">Loading incident...</p>
+      </div>
+    );
+  }
+
+  if (!ticket) {
+    return (
+      <div className="flex-1 bg-app p-8 flex flex-col items-center justify-center h-full font-sans">
+        <AlertTriangle className="w-12 h-12 text-rose-500 mb-3" />
+        <h2 className="text-sm font-bold text-primary">Incident Record Not Found</h2>
+        <p className="text-xs text-tertiary mt-1 max-w-sm text-center">
+          The incident ticket you are trying to access does not exist or has been removed from the database.
+        </p>
+        <button
+          onClick={() => {
+            if (currentUser.role === 'Agent') navigate('/agent/tickets');
+            else if (currentUser.role === 'Administrator') navigate('/admin/tickets');
+            else navigate('/tickets');
+          }}
+          className="mt-6 px-4 py-2 bg-card-solid border border-token rounded-lg text-xs font-semibold text-secondary hover-text transition-all cursor-pointer"
+        >
+          Return to Queue
+        </button>
+      </div>
+    );
+  }
+
+  // Safe from here on: the guards above guarantee `ticket` is non-null.
+  const displayedStatus = draftStatus ?? ticket.status;
+  const displayedPriority = draftPriority ?? ticket.priority;
+  const lifecycleDirty = displayedStatus !== ticket.status
+    || displayedPriority !== ticket.priority
+    || draftResolution !== undefined;
 
   return (
     <div

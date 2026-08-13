@@ -45,7 +45,7 @@ interface AppContextType {
   closeTicket: (id: string, reason?: string) => Promise<void>;
   reopenTicket: (id: string, reason?: string) => Promise<void>;
   deleteTicket: (id: string, reason?: string) => Promise<void>;
-  addComment: (ticketId: string, content: string, isInternal: boolean) => Promise<TicketComment>;
+  addComment: (ticketId: string, content: string, isInternal: boolean, attachment?: File | null) => Promise<TicketComment>;
   addKBArticle: (article: Omit<KnowledgeArticle, 'id'>) => void;
   loadPendingUsers: () => Promise<void>;
   loadAllUsers: (includeDeleted?: boolean) => Promise<void>;
@@ -315,9 +315,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     await refreshRoleKPIs();
   };
 
-  const addComment = async (ticketId: string, content: string, isInternal: boolean) => {
+  const addComment = async (ticketId: string, content: string, isInternal: boolean, attachment?: File | null) => {
     try {
-      const saved = await ticketApi.addCommentApi(ticketId, content, isInternal);
+      const saved = await ticketApi.addCommentApi(ticketId, content, isInternal, attachment);
       const newComment: TicketComment = ticketApi.mapTicketComment(saved);
       setComments(prev => [...prev, newComment]);
       return newComment;
