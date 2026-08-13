@@ -23,6 +23,20 @@ const WELCOME_MESSAGE: ChatMessage = {
   timestamp: new Date().toISOString(),
 };
 
+const CONTINUE_PROMPT_MESSAGE: ChatMessage = {
+  id: 'continue_prompt',
+  sender: 'assistant',
+  text: "I am here to help resolve your issue. Tell me what you need help with.",
+  timestamp: new Date().toISOString(),
+};
+
+const FRESH_QUERY_MESSAGE: ChatMessage = {
+  id: 'fresh_query',
+  sender: 'assistant',
+  text: "Tell me your query.",
+  timestamp: new Date().toISOString(),
+};
+
 type SuggestedTicketState = {
   title: string;
   description: string;
@@ -33,7 +47,14 @@ type SuggestedTicketState = {
   knowledgeBaseFallback?: boolean;
 } | null;
 
-type ConversationStatus = 'ACTIVE' | 'INVESTIGATING' | 'WAITING_FOR_USER' | 'LIKELY_RESOLVED' | 'ESCALATED' | 'RESOLVED';
+type ConversationStatus = 'ACTIVE' | 'AWAITING_SATISFACTION' | 'ISSUE_RESOLVED' | 'TICKET_CREATED' | 'CONTINUING' | 'NEW_CONVERSATION';
+
+type TicketSource = 'AI_RESOLVED' | 'FILE_INCIDENT' | null;
+
+type CreatedTicketInfo = {
+  ticketNumber: string;
+  ticketId: string;
+} | null;
 
 interface ChatContextType {
   messages: ChatMessage[];
@@ -51,6 +72,12 @@ interface ChatContextType {
   guidedState: string | null;
   isEscalating: boolean;
   isFeedbackLoading: boolean;
+  ticketCreatedForIssue: boolean;
+  createdTicketInfo: CreatedTicketInfo;
+  ticketSource: TicketSource;
+  activeTicketId: string | null;
+  currentIssueResolved: boolean;
+  currentIssueShownSatisfaction: boolean;
   contentRef: React.RefObject<HTMLDivElement | null>;
   handleSendPrompt: (text: string, preserveHistory?: boolean, forceNewSession?: boolean) => Promise<void>;
   handleGuidedYes: () => Promise<void>;
@@ -58,6 +85,8 @@ interface ChatContextType {
   handleConvertTicket: () => Promise<void>;
   handleSatisfactionResolved: () => Promise<void>;
   handleSatisfactionCreateTicket: () => Promise<void>;
+  continueInThisChat: () => void;
+  startNewQuery: () => void;
   resetThread: () => void;
 }
 
@@ -82,8 +111,26 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [guidedState, setGuidedState] = useState<string | null>(null);
   const [isEscalating, setIsEscalating] = useState(false);
   const [isFeedbackLoading, setIsFeedbackLoading] = useState(false);
+  const [ticketCreatedForIssue, setTicketCreatedForIssue] = useState(false);
+  const [createdTicketInfo, setCreatedTicketInfo] = useState<CreatedTicketInfo>(null);
+  const [ticketSource, setTicketSource] = useState<TicketSource>(null);
+  const [activeTicketId, setActiveTicketId] = useState<string | null>(null);
+  const [currentIssueResolved, setCurrentIssueResolved] = useState(false);
+  const [currentIssueShownSatisfaction, setCurrentIssueShownSatisfaction] = useState(false);
 
   const contentRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<ChatMessage[]>([WELCOME_MESSAGE]);
+  const sessionIdRef = useRef<string | null>(null);
+
+  // Keep refs in sync with state so async handlers always
+  // read the latest value instead of a stale closure.
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
 
   // Logout is the ONLY thing that clears the chat automatically. Tab
   // switches / route changes do not touch this provider at all, since it
@@ -103,6 +150,12 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setGuidedState(null);
       setIsTyping(false);
       setTypingText('');
+      setTicketCreatedForIssue(false);
+      setCreatedTicketInfo(null);
+      setTicketSource(null);
+      setActiveTicketId(null);
+      setCurrentIssueResolved(false);
+      setCurrentIssueShownSatisfaction(false);
     }
     wasAuthenticated.current = isAuthenticated;
   }, [isAuthenticated]);
@@ -209,13 +262,14 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const simulateTyping = async (text: string, msgId: string) => {
     setTypingText('');
-    let index = 0;
+    const indexRef = { current: 0 };
     const speed = 15;
 
     const typeChar = () => {
-      if (index < text.length) {
-        setTypingText(prev => prev + text.charAt(index));
-        index++;
+      if (indexRef.current < text.length) {
+        const char = text.charAt(indexRef.current);
+        indexRef.current++;
+        setTypingText(prev => prev + char);
         setTimeout(typeChar, speed);
       } else {
         setTypingText('');
@@ -266,7 +320,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     try {
       const chatHistory = preserveHistory
-        ? messages.map(msg => ({
+        ? messagesRef.current.map(msg => ({
             role: msg.sender === 'user' ? 'user' : 'assistant',
             content: msg.text,
           }))
@@ -277,8 +331,15 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         top_k: 5,
         similarity_threshold: 0.0,
         chat_history: chatHistory,
-        session_id: forceNewSession ? null : sessionId,
+        session_id: forceNewSession ? null : sessionIdRef.current,
+        reset_satisfaction: conversationStatus === 'CONTINUING' || conversationStatus === 'NEW_CONVERSATION',
       });
+
+      // After sending, transition from CONTINUING/NEW_CONVERSATION to ACTIVE
+      // (we are now in a new issue within the same or new session)
+      if (conversationStatus === 'CONTINUING' || conversationStatus === 'NEW_CONVERSATION') {
+        setConversationStatus('ACTIVE');
+      }
 
       setSessionId(response.session_id);
       try { if (response.session_id) sessionStorage.setItem(SESSION_STORAGE_KEY, response.session_id); } catch (e) { /* ignore */ }
@@ -290,13 +351,21 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setGuidedState(response.guided_state || null);
 
       if (response.guided_state === 'RESOLVED') {
-        setConversationStatus('RESOLVED');
+        setConversationStatus('ISSUE_RESOLVED');
+        setCurrentIssueResolved(true);
         setActiveSatisfactionCard(null);
         setPendingSatisfactionCard(null);
         setSuggestedTicket(prev => prev ? { ...prev, resolvedByAI: true } : prev);
+<<<<<<< Updated upstream
       } else if (!response.guided_state && response.satisfaction_card?.show && !activeSatisfactionCard && !pendingSatisfactionCard) {
         // Store in pending state; it will be shown after typing completes
         setPendingSatisfactionCard(response.satisfaction_card);
+=======
+      } else if (!response.guided_state && response.satisfaction_card?.show && !activeSatisfactionCard) {
+        setActiveSatisfactionCard(response.satisfaction_card);
+        setCurrentIssueShownSatisfaction(true);
+        setConversationStatus('AWAITING_SATISFACTION');
+>>>>>>> Stashed changes
       }
 
       simulateTyping(response.answer, `bot_${Date.now()}`);
@@ -340,9 +409,13 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const feedbackResult = await submitAIChatFeedback(sessionId, 'positive');
       const refreshedTickets = await loadTickets();
       const refreshedAITicket = refreshedTickets.find(ticket => ticket.aiResolved === true);
-      setConversationStatus('RESOLVED');
-      setGuidedActions([]);
-      setGuidedState('RESOLVED');
+    setConversationStatus('ISSUE_RESOLVED');
+    setCurrentIssueResolved(true);
+    setGuidedActions([]);
+    setGuidedState('RESOLVED');
+      setTicketSource('AI_RESOLVED');
+      const resolvedTicketId = (feedbackResult.ticket_id ?? undefined) || suggestedTicket?.ticketId || refreshedAITicket?.id;
+      setActiveTicketId(resolvedTicketId || null);
       setSuggestedTicket(prev => ({
         ...(prev || {
           title: 'AI Resolved Support Request',
@@ -351,7 +424,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }),
         show: true,
         resolvedByAI: true,
-        ticketId: (feedbackResult.ticket_id ?? undefined) || prev?.ticketId || refreshedAITicket?.id,
+        ticketId: resolvedTicketId,
       }));
       setMessages(prev => [...prev, {
         id: `resolved_${Date.now()}`,
@@ -390,14 +463,24 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const uniqueId = `sys_${sessionId ? sessionId.slice(0, 8) : 'unknown'}_${Date.now()}`;
 
     try {
-      const newTicket = await escalateToTicket(sessionId);
+      // Smart ticket grouping: if same source, pass existing ticket ID to append
+      const existingId = (ticketSource === 'FILE_INCIDENT' && activeTicketId) ? activeTicketId : undefined;
+      const newTicket = await escalateToTicket(sessionId, undefined, 'FILE_INCIDENT', existingId, suggestedTicket.title);
       await loadTickets();
       setSuggestedTicket(null);
+      setTicketCreatedForIssue(true);
+      setTicketSource('FILE_INCIDENT');
+      setConversationStatus('TICKET_CREATED');
+      setActiveTicketId(newTicket.id);
+      setCreatedTicketInfo({
+        ticketNumber: newTicket.ticketNumber || newTicket.id,
+        ticketId: newTicket.id,
+      });
 
       const confirmationMsg: ChatMessage = {
         id: uniqueId,
         sender: 'system',
-        text: `✅ **IT Incident Ticket Created Successfully!**\n\n**Ticket Reference:** ${newTicket.ticketNumber || newTicket.id}\n**Priority:** ${newTicket.priority.toUpperCase()}\n**Status:** OPEN\n\nYou can view and track this ticket in the Ticket Queue.`,
+        text: `✅ **IT Incident Ticket Created Successfully!**\n\n**Ticket Reference:** ${newTicket.ticketNumber || newTicket.id}\n**Priority:** ${newTicket.priority.toUpperCase()}\n**Status:** OPEN\n\nYour issue has been handed over to IT Support.`,
         timestamp: new Date().toISOString(),
       };
 
@@ -430,9 +513,13 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const feedbackResult = await submitAIChatFeedback(sid, 'positive');
         const refreshedTickets = await loadTickets();
         const refreshedAITicket = refreshedTickets.find(ticket => ticket.aiResolved === true);
-        setSuggestedTicket(prev => prev ? { ...prev, show: true, resolvedByAI: true, ticketId: (feedbackResult.ticket_id ?? undefined) || prev.ticketId || refreshedAITicket?.id } : prev);
+        const resolvedTicketId = (feedbackResult.ticket_id ?? undefined) || suggestedTicket?.ticketId || refreshedAITicket?.id;
+        setActiveTicketId(resolvedTicketId || null);
+        setSuggestedTicket(prev => prev ? { ...prev, show: true, resolvedByAI: true, ticketId: resolvedTicketId } : prev);
       }
-      setConversationStatus('RESOLVED');
+    setConversationStatus('ISSUE_RESOLVED');
+    setCurrentIssueResolved(true);
+    setTicketSource('AI_RESOLVED');
       setActiveSatisfactionCard(null);
       const resolvedMsg = 'Thanks for confirming. Your issue has been marked as Resolved by AI.';
       setMessages(prev => [...prev, { id: `assist_${Date.now()}`, sender: 'assistant', text: resolvedMsg, timestamp: new Date().toISOString() }]);
@@ -457,21 +544,29 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (suggestedTicket && sid) {
         await handleConvertTicket();
       } else if (sid) {
-        const newTicket = await escalateToTicket(sid, 'AI could not resolve; user requested ticket from satisfaction card.');
+        const existingId = (ticketSource === 'FILE_INCIDENT' && activeTicketId) ? activeTicketId : undefined;
+        const newTicket = await escalateToTicket(sid, 'AI could not resolve; user requested ticket from satisfaction card.', 'FILE_INCIDENT', existingId, suggestedTicket?.title);
         await loadTickets();
+        setTicketCreatedForIssue(true);
+        setTicketSource('FILE_INCIDENT');
+        setActiveTicketId(newTicket.id);
+        setCreatedTicketInfo({
+          ticketNumber: newTicket.ticketNumber || newTicket.id,
+          ticketId: newTicket.id,
+        });
         const confirmationMsg: ChatMessage = {
           id: uniqueId,
           sender: 'system',
-          text: `✅ **IT Incident Ticket Created Successfully!**\n\n**Ticket Reference:** ${newTicket.ticketNumber || newTicket.id}\n**Priority:** ${newTicket.priority.toUpperCase()}\n**Status:** OPEN\n\nYou can view and track this ticket in the Ticket Queue.`,
+          text: `✅ **IT Incident Ticket Created Successfully!**\n\n**Ticket Reference:** ${newTicket.ticketNumber || newTicket.id}\n**Priority:** ${newTicket.priority.toUpperCase()}\n**Status:** OPEN\n\nYour issue has been handed over to IT Support.`,
           timestamp: new Date().toISOString(),
         };
         setMessages(prev => [...prev, confirmationMsg]);
       }
-      setConversationStatus('ESCALATED');
-      setActiveSatisfactionCard(null);
-      setSuggestedTicket(null);
-    } catch (error) {
-      console.error('[Satisfaction Ticket] Failed:', error);
+    setConversationStatus('TICKET_CREATED');
+    setActiveSatisfactionCard(null);
+    setSuggestedTicket(null);
+  } catch (error) {
+    console.error('[Satisfaction Ticket] Failed:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to create support ticket. Please try again.';
       const errorMsg: ChatMessage = {
         id: `err_${sid ? sid.slice(0, 8) : 'unknown'}_${Date.now()}`,
@@ -503,6 +598,48 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setConversationStatus('ACTIVE');
     setGuidedActions([]);
     setGuidedState(null);
+    setTicketCreatedForIssue(false);
+    setCreatedTicketInfo(null);
+    setTicketSource(null);
+    setActiveTicketId(null);
+    setCurrentIssueResolved(false);
+    setCurrentIssueShownSatisfaction(false);
+    try { sessionStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) { /* ignore */ }
+  };
+
+  // Keep the conversation linked to the existing issue; add a prompt and unfreeze input.
+  const continueInThisChat = () => {
+    setTicketCreatedForIssue(false);
+    setCurrentIssueResolved(false);
+    setCurrentIssueShownSatisfaction(false);
+    setConversationStatus('CONTINUING');
+    setActiveSatisfactionCard(null);
+    setGuidedActions([]);
+    setGuidedState(null);
+    const promptMsg: ChatMessage = {
+      ...CONTINUE_PROMPT_MESSAGE,
+      id: `continue_prompt_${Date.now()}`,
+      timestamp: new Date().toISOString(),
+    };
+    setMessages(prev => [...prev, promptMsg]);
+  };
+
+  // Start a fresh issue context — reset everything and show a short prompt.
+  const startNewQuery = () => {
+    setMessages([FRESH_QUERY_MESSAGE]);
+    setSuggestedTicket(null);
+    setSessionId(null);
+    setCollapsedMessages({});
+    setActiveSatisfactionCard(null);
+    setConversationStatus('NEW_CONVERSATION');
+    setGuidedActions([]);
+    setGuidedState(null);
+    setTicketCreatedForIssue(false);
+    setCreatedTicketInfo(null);
+    setTicketSource(null);
+    setActiveTicketId(null);
+    setCurrentIssueResolved(false);
+    setCurrentIssueShownSatisfaction(false);
     try { sessionStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) { /* ignore */ }
   };
 
@@ -524,6 +661,12 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         guidedState,
         isEscalating,
         isFeedbackLoading,
+        ticketCreatedForIssue,
+        createdTicketInfo,
+        ticketSource,
+        activeTicketId,
+        currentIssueResolved,
+        currentIssueShownSatisfaction,
         contentRef,
         handleSendPrompt,
         handleGuidedYes,
@@ -531,6 +674,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         handleConvertTicket,
         handleSatisfactionResolved,
         handleSatisfactionCreateTicket,
+        continueInThisChat,
+        startNewQuery,
         resetThread,
       }}
     >

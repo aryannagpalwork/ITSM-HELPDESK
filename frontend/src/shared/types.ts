@@ -161,6 +161,7 @@ export interface ChatRequest {
   similarity_threshold?: number;
   chat_history?: ChatMessageInput[];
   session_id?: string | null;
+  reset_satisfaction?: boolean | null;
 }
 
 export interface RetrievedDocumentSource {

@@ -1262,13 +1262,22 @@ export const deleteKnowledgeDocument = async (documentId: number): Promise<void>
   if (!response.ok) throw new Error('Failed to delete document');
 };
 
-export const escalateToTicket = async (sessionId: string, userFeedback?: string): Promise<Ticket> => {
+export const escalateToTicket = async (
+  sessionId: string,
+  userFeedback?: string,
+  source?: string,
+  existingTicketId?: string,
+  newIssueTitle?: string,
+): Promise<Ticket> => {
   const response = await apiFetch(`${API_BASE_URL}/chat/escalate-to-ticket`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       session_id: sessionId,
       user_feedback: userFeedback,
+      source: source || undefined,
+      existing_ticket_id: existingTicketId || undefined,
+      new_issue_title: newIssueTitle || undefined,
     }),
   });
   if (!response.ok) {
