@@ -645,6 +645,19 @@ const getStatusBadgeColor = (status: TicketStatus) => {
             </div>
           </div>
 
+          {(search || statusFilter !== 'all' || priorityFilter !== 'all' || categoryFilter !== 'all') && (
+            <div className="flex items-center gap-2 mb-4">
+              <button
+                type="button"
+                onClick={() => { setSearch(''); setStatusFilter('all'); setPriorityFilter('all'); setCategoryFilter('all'); }}
+                className="text-[10px] font-mono px-2.5 py-1 rounded-lg border transition-colors cursor-pointer"
+                style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)', backgroundColor: 'var(--card-bg)' }}
+              >
+                Clear Filters
+              </button>
+            </div>
+          )}
+
           {filteredTickets.length === 0 ? (
             <div className="p-8 border border-dashed border-token rounded-xl text-center">
               <AlertCircle className="w-8 h-8 text-tertiary mx-auto mb-2" />

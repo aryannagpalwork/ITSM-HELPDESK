@@ -276,6 +276,7 @@ function applyThemeOnDocument(theme: ThemeId) {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
   root.setAttribute('data-theme', theme);
+  root.style.colorScheme = theme === 'light' ? 'light' : 'dark';
   const meta = document.querySelector('meta[name="theme-color"]');
   const swatch = THEMES.find(t => t.id === theme)?.swatch ?? '#09090b';
   if (meta) {

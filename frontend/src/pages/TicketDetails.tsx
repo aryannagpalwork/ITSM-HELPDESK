@@ -885,7 +885,7 @@ export const TicketDetails: React.FC = () => {
                       >
                         {ticket.status}
                       </span>
-                      {ticket.status === 'resolved' && (
+                      {ticket.status === 'resolved' && currentUser.role !== 'Employee' && (
                         <button
                           onClick={() => {
                             setModal({ action: 'reopen', isOpen: true });
@@ -998,7 +998,7 @@ export const TicketDetails: React.FC = () => {
                       </button>
                     )}
 
-                    {(displayedStatus === 'resolved' || displayedStatus === 'closed') && (
+                    {(displayedStatus === 'resolved' || displayedStatus === 'closed') && currentUser.role !== 'Employee' && (
                       <button
                         onClick={() => {
                           setModal({ action: 'reopen', isOpen: true });

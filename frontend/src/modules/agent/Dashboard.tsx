@@ -769,6 +769,19 @@ export const AgentDashboard: React.FC = () => {
           </div>
         </div>
 
+        {(search || statusFilter !== 'all' || priorityFilter !== 'all' || assignmentFilter !== 'all') && (
+          <div className="flex items-center gap-2 mb-4">
+            <button
+              type="button"
+              onClick={() => { setSearch(''); setStatusFilter('all'); setPriorityFilter('all'); setAssignmentFilter('all'); }}
+              className="text-[10px] font-mono px-2.5 py-1 rounded-lg border transition-colors cursor-pointer"
+              style={{ borderColor: tokens.border, color: tokens.textSecondary, backgroundColor: tokens.cardBgSolid }}
+            >
+              Clear Filters
+            </button>
+          </div>
+        )}
+
         {filteredTickets.length === 0 ? (
           <div 
             className="p-8 rounded-xl text-center"

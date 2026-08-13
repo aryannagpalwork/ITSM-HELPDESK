@@ -290,6 +290,19 @@ export const TicketDashboard: React.FC = () => {
           </div>
 
         </div>
+
+        {(search || statusFilter !== 'all' || priorityFilter !== 'all') && (
+          <div className="flex items-center gap-2 mt-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+            <button
+              type="button"
+              onClick={() => { setSearch(''); setStatusFilter('all'); setPriorityFilter('all'); }}
+              className="text-[10px] font-mono px-2.5 py-1 rounded-lg border transition-colors cursor-pointer"
+              style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)', backgroundColor: 'var(--card-bg)' }}
+            >
+              Clear Filters
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Main Grid List of Tickets */}
