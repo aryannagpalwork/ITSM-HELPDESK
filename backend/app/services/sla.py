@@ -127,3 +127,58 @@ def snapshot_for_ticket(ticket: dict[str, Any], now: datetime | None = None) -> 
         now=current_time,
         resolved_at=resolved_at,
     )
+
+
+async def recalculate_sla_for_all_tickets(db, priorities: list[str] | None = None) -> int:
+    """
+    Recalculate SLA status for all tickets after SLA configuration changes.
+    
+    This function:
+    - Finds all tickets (or only tickets of specified priorities)
+    - Recalculates their SLA status using the newly updated SLA configuration
+    - Updates their SLA fields in the database
+    - Preserves original creation time and resolution time
+    
+    Args:
+        db: AsyncIOMotorDatabase instance
+        priorities: List of priorities to recalculate (e.g., ["Critical", "High"]).
+                    If None, recalculates all tickets.
+    
+    Returns:
+        Number of tickets updated
+    """
+    from pymongo import UpdateOne
+    
+    query = {}
+    if priorities:
+        # Normalize priorities to title case
+        normalized_priorities = [p.title() if isinstance(p, str) else p for p in priorities]
+        query["priority"] = {"$in": normalized_priorities}
+    
+    # Fetch all relevant tickets
+    tickets = await db.tickets.find(query).to_list(length=None)
+    
+    if not tickets:
+        return 0
+    
+    # Prepare bulk updates
+    updates = []
+    now = datetime.utcnow()
+    
+    for ticket in tickets:
+        # Recalculate SLA for this ticket using the new configuration
+        new_sla = snapshot_for_ticket(ticket, now)
+        
+        updates.append(
+            UpdateOne(
+                {"_id": ticket["_id"]},
+                {"$set": new_sla}
+            )
+        )
+    
+    # Execute bulk updates if there are any
+    if updates:
+        result = await db.tickets.bulk_write(updates)
+        return result.modified_count
+    
+    return 0
