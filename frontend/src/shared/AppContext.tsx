@@ -35,7 +35,7 @@ interface AppContextType {
   loadRoleAgentKPIs: () => Promise<void>;
   loadAdminKPIs: () => Promise<void>;
   refreshRoleKPIs: () => Promise<void>;
-  createTicket: (ticket: Partial<Ticket>, reason?: string) => Promise<Ticket>;
+  createTicket: (ticket: Partial<Ticket>, reason?: string, duplicateContext?: { duplicateOfTicketId?: string; duplicateStatus?: string; duplicateSimilarityScore?: number }) => Promise<Ticket>;
   updateTicket: (id: string, updates: Partial<Ticket>, reason?: string) => Promise<Ticket>;
   assignTicket: (id: string, assignedTo?: string, reason?: string) => Promise<void>;
   reassignTicket: (id: string, assignedTo?: string, reason?: string) => Promise<void>;
@@ -248,8 +248,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [isAuthenticated, currentUser.role]);
 
-  const createTicket = async (ticketInput: Partial<Ticket>, reason?: string): Promise<Ticket> => {
-    const newTicket = await ticketApi.createTicket(ticketInput, currentUser.id, reason);
+  const createTicket = async (
+    ticketInput: Partial<Ticket>,
+    reason?: string,
+    duplicateContext?: { duplicateOfTicketId?: string; duplicateStatus?: string; duplicateSimilarityScore?: number },
+  ): Promise<Ticket> => {
+    const newTicket = await ticketApi.createTicket(ticketInput, currentUser.id, reason, duplicateContext);
     setTickets(prev => [newTicket, ...prev.filter(t => t.id !== newTicket.id)]);
     await refreshRoleKPIs();
     return newTicket;

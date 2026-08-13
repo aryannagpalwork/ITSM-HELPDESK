@@ -66,6 +66,9 @@ class TicketCreate(BaseModel):
     resolution_source: str | None = None
     ai_resolved: bool = False
     ai_conversation_id: str | None = None
+    duplicate_of_ticket_id: str | None = None
+    duplicate_status: str | None = None
+    duplicate_similarity_score: float | None = None
     # AI Analysis fields
     ai_analysis_category: str | None = None
     ai_analysis_priority: str | None = None
@@ -212,6 +215,18 @@ class TicketAnalyzeResponse(BaseModel):
     suggested_resolution: str
     knowledge_articles: list[str]
     estimated_sla: str
+
+
+class TicketDuplicateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    description: str = Field(min_length=1)
+
+
+class TicketDuplicateResponse(BaseModel):
+    status: str
+    similarity_score: float
+    ticket: dict | None = None
+    message: str | None = None
 
 
 class TicketListResponse(BaseModel):

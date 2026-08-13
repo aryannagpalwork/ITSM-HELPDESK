@@ -20,12 +20,15 @@ from app.schemas.ticket import (
     TicketUpdate,
     TicketAnalyzeRequest,
     TicketAnalyzeResponse,
+    TicketDuplicateRequest,
+    TicketDuplicateResponse,
 )
 from app.schemas.audit_log import AuditLogRead
 from app.services.tickets import (
     add_comment,
     create_ticket,
     delete_ticket,
+    find_duplicate_ticket,
     get_ticket,
     list_tickets,
     update_ticket,
@@ -146,6 +149,30 @@ class UpdateTicketRequest(BaseModel):
     reason: str | None = None
 
 
+@router.post("/check-duplicate", response_model=TicketDuplicateResponse, status_code=status.HTTP_200_OK)
+async def check_duplicate_ticket_endpoint(
+    payload: TicketDuplicateRequest,
+    db: DatabaseSession,
+    current_user: dict = Depends(get_current_user),
+) -> TicketDuplicateResponse:
+    """Check whether a ticket has an exact or likely duplicate in the recent ticket history."""
+    duplicate = await find_duplicate_ticket(db, payload.title, payload.description, current_user["id"])
+    if not duplicate:
+        return TicketDuplicateResponse(status="none", similarity_score=0.0, ticket=None, message="No duplicate detected.")
+
+    return TicketDuplicateResponse(
+        status=duplicate["duplicate_status"],
+        similarity_score=duplicate["similarity_score"],
+        ticket={
+            "id": duplicate["id"],
+            "ticket_number": duplicate["ticket_number"],
+            "title": duplicate["title"],
+            "status": duplicate["status"],
+        },
+        message="An existing ticket appears to match this report.",
+    )
+
+
 @router.post("", response_model=TicketRead, status_code=status.HTTP_201_CREATED)
 async def create_ticket_endpoint(
     payload: TicketCreate,
@@ -156,6 +183,8 @@ async def create_ticket_endpoint(
     """Create a new incident ticket with an automatically generated ticket number."""
     if payload.created_by is None:
         payload.created_by = current_user["id"]
+    if payload.duplicate_of_ticket_id and payload.duplicate_status:
+        payload.duplicate_similarity_score = float(payload.duplicate_similarity_score or 0.0)
     return await create_ticket(db, payload, reason, current_user)
 
 

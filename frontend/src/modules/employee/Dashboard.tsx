@@ -25,7 +25,7 @@ import {
   Loader2
 } from 'lucide-react';
 import { TicketPriority, TicketStatus, TimelineRange, TicketLifecycleTimeline } from '../../shared/types';
-import { getEmployeeTicketTimeline } from '../../shared/api';
+import { getEmployeeTicketTimeline, checkDuplicateTicket } from '../../shared/api';
 import TicketLifecycleDetailChart from '../admin/components/charts/TicketLifecycleDetailChart';
 import { TicketStatusOverviewStepper } from '../../components/TicketStatusOverviewStepper';
 import {
@@ -54,6 +54,13 @@ export const EmployeeDashboard: React.FC = () => {
   const [ticketLifecycle, setTicketLifecycle] = useState<TicketLifecycleTimeline | null>(null);
   
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [duplicateWarning, setDuplicateWarning] = useState<{
+    status: 'exact' | 'possible' | 'none';
+    similarity_score: number;
+    ticket?: { id: string; ticket_number: string; title: string; status: string };
+    message?: string;
+  } | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [newPriority, setNewPriority] = useState<TicketPriority>('medium');
@@ -180,16 +187,75 @@ export const EmployeeDashboard: React.FC = () => {
     e.preventDefault();
     if (!newTitle.trim() || !newDesc.trim()) return;
 
-    await createTicket({
-      title: newTitle,
-      description: newDesc,
-      priority: newPriority,
-    });
+    const trimmedTitle = newTitle.trim();
+    const trimmedDescription = newDesc.trim();
+    setIsSubmitting(true);
 
-    setNewTitle('');
-    setNewDesc('');
-    setNewPriority('medium');
-    setIsCreateOpen(false);
+    try {
+      const possibleDuplicate = await checkDuplicateTicket({
+        title: trimmedTitle,
+        description: trimmedDescription,
+      });
+
+      if (possibleDuplicate.status === 'exact' || possibleDuplicate.status === 'possible') {
+        setDuplicateWarning(possibleDuplicate);
+        return;
+      }
+
+      await createTicket({
+        title: trimmedTitle,
+        description: trimmedDescription,
+        priority: newPriority,
+      });
+
+      setNewTitle('');
+      setNewDesc('');
+      setNewPriority('medium');
+      setIsCreateOpen(false);
+    } catch (error) {
+      console.warn('Duplicate check failed; continuing with creation.', error);
+      await createTicket({
+        title: trimmedTitle,
+        description: trimmedDescription,
+        priority: newPriority,
+      });
+      setNewTitle('');
+      setNewDesc('');
+      setNewPriority('medium');
+      setIsCreateOpen(false);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCreateAnyway = async () => {
+    const trimmedTitle = newTitle.trim();
+    const trimmedDescription = newDesc.trim();
+    setDuplicateWarning(null);
+    setIsSubmitting(true);
+
+    try {
+      await createTicket(
+        {
+          title: trimmedTitle,
+          description: trimmedDescription,
+          priority: newPriority,
+        },
+        undefined,
+        duplicateWarning ? {
+          duplicateOfTicketId: duplicateWarning.ticket?.id,
+          duplicateStatus: duplicateWarning.status,
+          duplicateSimilarityScore: duplicateWarning.similarity_score,
+        } : undefined,
+      );
+
+      setNewTitle('');
+      setNewDesc('');
+      setNewPriority('medium');
+      setIsCreateOpen(false);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleKpiKeyDown = (e: React.KeyboardEvent, status: 'all' | 'open' | 'resolved') => {
@@ -779,6 +845,59 @@ const getStatusBadgeColor = (status: TicketStatus) => {
         </div>
       )}
 
+      {/* Duplicate Warning Modal */}
+      {duplicateWarning && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="w-full max-w-lg bg-card-solid border border-token rounded-2xl p-6 shadow-2xl relative">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="rounded-full bg-amber-500/10 p-2 text-amber-400">
+                <AlertTriangle className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-primary">Possible duplicate detected</h3>
+                <p className="text-[10px] text-secondary">This issue looks similar to an existing ticket.</p>
+              </div>
+            </div>
+
+            <div className="bg-input border border-token rounded-xl p-4 mb-4">
+              <div className="flex items-center justify-between gap-2 text-[10px] text-secondary mb-1">
+                <span className="font-mono uppercase tracking-wider">Existing ticket</span>
+                <span className="text-accent font-semibold">{duplicateWarning.similarity_score * 100 >= 100 ? '100%' : `${Math.round(duplicateWarning.similarity_score * 100)}%`} match</span>
+              </div>
+              <p className="text-sm font-semibold text-primary truncate">{duplicateWarning.ticket?.title || 'Existing issue'}</p>
+              <p className="text-[11px] text-tertiary mt-1">{duplicateWarning.ticket ? `#${duplicateWarning.ticket.ticket_number} • ${duplicateWarning.ticket.status}` : 'Recent ticket match'}</p>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              {duplicateWarning.ticket && (
+                <button
+                  type="button"
+                  onClick={() => navigate(`/tickets/${duplicateWarning.ticket!.id}`)}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold bg-card-solid hover-surface text-secondary border border-token cursor-pointer"
+                >
+                  View Existing Ticket
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setDuplicateWarning(null)}
+                className="px-4 py-2 rounded-lg text-xs font-semibold text-secondary hover-text bg-card-solid border border-token cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateAnyway}
+                className="px-4 py-2 rounded-lg text-xs font-semibold accent-btn cursor-pointer shadow-md"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? 'Submitting...' : 'Create Anyway'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Create Ticket Modal */}
       {isCreateOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -845,9 +964,10 @@ const getStatusBadgeColor = (status: TicketStatus) => {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-lg text-xs font-semibold accent-btn cursor-pointer shadow-md"
+                  className="px-4 py-2 rounded-lg text-xs font-semibold accent-btn cursor-pointer shadow-md disabled:opacity-60"
+                  disabled={isSubmitting}
                 >
-                  Submit Ticket
+                  {isSubmitting ? 'Checking...' : 'Submit Ticket'}
                 </button>
               </div>
             </form>

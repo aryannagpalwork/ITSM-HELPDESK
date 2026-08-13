@@ -160,6 +160,50 @@ async def _get_ticket_escalation_counts(
     return {r["_id"]: r["count"] for r in results}
 
 
+async def _get_ticket_response_map(
+    db: AsyncIOMotorDatabase, ticket_ids: list[str]
+) -> dict[str, datetime]:
+    if not ticket_ids:
+        return {}
+
+    response_map: dict[str, datetime] = {}
+
+    if hasattr(db, "ticket_comments"):
+        comment_rows = await db.ticket_comments.find({
+            "ticket_id": {"$in": ticket_ids},
+        }, {"ticket_id": 1, "created_at": 1}).to_list(length=None)
+        for row in comment_rows:
+            ticket_id = row.get("ticket_id")
+            created_at = _coerce_datetime(row.get("created_at"))
+            if not ticket_id or created_at is None:
+                continue
+            existing = response_map.get(ticket_id)
+            if existing is None or created_at < existing:
+                response_map[ticket_id] = created_at
+
+    audit_rows = await db.audit_logs.find(
+        {
+            "entity_type": "ticket",
+            "entity_id": {"$in": ticket_ids},
+            "action": {"$in": ["ticket.response", "ticket.commented", "ticket.updated", "ticket.reopened", "ticket.resolved"]},
+        },
+        {"entity_id": 1, "action": 1, "created_at": 1, "metadata_json": 1},
+    ).to_list(length=None)
+    for row in audit_rows:
+        ticket_id = row.get("entity_id")
+        created_at = _coerce_datetime(row.get("created_at"))
+        if created_at is None:
+            metadata = _audit_metadata_json(row)
+            created_at = _coerce_datetime(metadata.get("created_at") or metadata.get("timestamp"))
+        if not ticket_id or created_at is None:
+            continue
+        existing = response_map.get(ticket_id)
+        if existing is None or created_at < existing:
+            response_map[ticket_id] = created_at
+
+    return response_map
+
+
 def _is_ai_resolved_ticket(ticket: dict) -> bool:
     return (
         ticket.get("ai_resolved") is True

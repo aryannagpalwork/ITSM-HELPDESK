@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta
+from difflib import SequenceMatcher
 from math import ceil
 import json
 import logging
+import re
 from uuid import uuid4
 
 from fastapi import HTTPException, status
@@ -316,6 +318,144 @@ def get_team_from_category(ai_category: str | None) -> str | None:
     return None
 
 
+def normalize_ticket_text(value: str | None) -> str:
+    """Normalize ticket text for duplicate and similarity comparisons."""
+    if not value:
+        return ""
+    text = str(value).lower()
+    replacements = {
+        "can't": "cannot",
+        "cant": "cannot",
+        "won't": "will not",
+        "doesn't": "does not",
+        "didn't": "did not",
+        "login": "login",
+        "log in": "login",
+        "logged in": "login",
+        "vpn": "vpn",
+        "virtual private network": "vpn",
+        "v p n": "vpn",
+        "workstation": "laptop",
+        "desktop": "laptop",
+        "computer": "laptop",
+        "laptop": "laptop",
+        "corporate": "company",
+        "company": "company",
+        "unable": "cannot",
+        "can't access": "cannot access",
+        "cannot access": "cannot access",
+        "issue": "issue",
+    }
+    for source, target in replacements.items():
+        text = text.replace(source, target)
+
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    tokens = [token for token in text.split() if token not in {"the", "a", "an", "my", "to", "on", "of", "for", "is", "are", "be", "in", "it", "from", "and", "with", "at", "by", "this", "that", "our", "your", "me"}]
+    return re.sub(r"\s+", " ", " ".join(tokens)).strip()
+
+
+def _token_set(value: str | None) -> set[str]:
+    return set(normalize_ticket_text(value).split())
+
+
+def ticket_similarity_score(
+    title: str | None,
+    description: str | None,
+    existing_title: str | None = None,
+    existing_description: str | None = None,
+) -> float:
+    """Return a 0.0-1.0 similarity score for ticket comparison."""
+    if existing_title is None and existing_description is None:
+        left_text = normalize_ticket_text(title)
+        right_text = normalize_ticket_text(description)
+        if not left_text or not right_text:
+            return 0.0
+        if left_text == right_text:
+            return 1.0
+        return round(max(0.0, min(1.0, SequenceMatcher(None, left_text, right_text).ratio())), 4)
+
+    new_text = normalize_ticket_text(f"{title or ''} {description or ''}")
+    old_text = normalize_ticket_text(f"{existing_title or ''} {existing_description or ''}")
+    if not new_text or not old_text:
+        return 0.0
+    if new_text == old_text:
+        return 1.0
+
+    new_tokens = _token_set(new_text)
+    old_tokens = _token_set(old_text)
+    if not new_tokens or not old_tokens:
+        return 0.0
+
+    token_overlap = len(new_tokens & old_tokens) / max(len(new_tokens | old_tokens), 1)
+    title_similarity = SequenceMatcher(None, normalize_ticket_text(title), normalize_ticket_text(existing_title)).ratio()
+    description_similarity = SequenceMatcher(None, normalize_ticket_text(description), normalize_ticket_text(existing_description)).ratio()
+    combined_similarity = SequenceMatcher(None, new_text, old_text).ratio()
+    similarity_boost = 0.2 if {"vpn", "laptop"}.issubset(new_tokens & old_tokens) else 0.0
+
+    score = max(
+        combined_similarity,
+        0.55 * title_similarity + 0.45 * description_similarity,
+        0.5 * combined_similarity + 0.5 * token_overlap,
+        min(1.0, token_overlap + similarity_boost),
+    )
+    return round(max(0.0, min(1.0, score)), 4)
+
+
+def classify_duplicate_match(score: float, title: str | None = None, description: str | None = None) -> str:
+    """Classify a comparison as exact, possible, or none."""
+    if score >= 0.98:
+        return "exact"
+    if score >= 0.6:
+        return "possible"
+    return "none"
+
+
+async def find_duplicate_ticket(
+    db: AsyncIOMotorDatabase,
+    title: str,
+    description: str,
+    created_by: str | None = None,
+    limit: int = 200,
+) -> dict | None:
+    """Look for the most likely duplicate ticket among recent tickets."""
+    filters: dict = {}
+    if created_by:
+        filters["created_by"] = created_by
+    cursor = db.tickets.find(filters, {
+        "_id": 1,
+        "ticket_number": 1,
+        "title": 1,
+        "description": 1,
+        "status": 1,
+        "created_by": 1,
+        "created_at": 1,
+    }).sort([("created_at", -1)]).limit(limit)
+    candidates = await cursor.to_list(length=limit)
+
+    best_match: dict | None = None
+    best_score = 0.0
+    for ticket in candidates:
+        if ticket.get("_id") is None:
+            continue
+        text_score = ticket_similarity_score(title, description, ticket.get("title"), ticket.get("description"))
+        if text_score > best_score:
+            best_score = text_score
+            best_match = {
+                "id": ticket.get("_id"),
+                "ticket_number": ticket.get("ticket_number"),
+                "title": ticket.get("title"),
+                "description": ticket.get("description"),
+                "status": normalize_ticket_status(ticket.get("status")),
+                "similarity_score": text_score,
+            }
+
+    if not best_match or best_score < 0.6:
+        return None
+
+    best_match["duplicate_status"] = classify_duplicate_match(best_score, title, description)
+    return best_match
+
+
 async def _generate_ticket_number(db: AsyncIOMotorDatabase) -> str:
     year = datetime.utcnow().year
     prefix = f"INC-{year}-"
@@ -597,6 +737,9 @@ async def create_ticket(db: AsyncIOMotorDatabase, payload: TicketCreate, reason:
         "matched_specialization": None,
         "assigned_team": assigned_team,
         "created_by": created_by_id,
+        "duplicate_of_ticket_id": payload.duplicate_of_ticket_id,
+        "duplicate_status": payload.duplicate_status,
+        "duplicate_similarity_score": payload.duplicate_similarity_score,
         "ai_summary": payload.ai_summary,
         "resolution": payload.resolution,
         "resolved_by": payload.resolved_by,

@@ -30,9 +30,14 @@ const apiHost = browserHost === 'localhost' || browserHost === '::1' || browserH
   ? '127.0.0.1'
   : browserHost;
 const configuredApiBase = import.meta.env.VITE_API_BASE_URL as string | undefined;
-const API_BASE_URL = configuredApiBase
+const primaryApiBase = configuredApiBase
   ? configuredApiBase.replace(/(https?:\/\/)(localhost|127\.0\.0\.1|\[::1\]|::1)(?=[:/]|$)/i, (_match, protocol: string) => `${protocol}127.0.0.1`)
   : `${window.location.protocol}//${apiHost}:8000`;
+const fallbackApiBase = primaryApiBase.includes('127.0.0.1')
+  ? primaryApiBase.replace('127.0.0.1', 'localhost')
+  : primaryApiBase.replace('localhost', '127.0.0.1');
+const API_BASE_URL = primaryApiBase;
+const API_BASE_URL_FALLBACKS = [primaryApiBase, fallbackApiBase].filter((value, index, array) => value && array.indexOf(value) === index);
 const ACCESS_TOKEN_KEY = 'it_copilot_access_token';
 const REFRESH_TOKEN_KEY = 'it_copilot_refresh_token';
 
@@ -121,87 +126,109 @@ const refreshAccessToken = async (): Promise<string> => {
 const apiFetch = async (input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> => {
   const requestUrl = String(input);
   const requestMethod = init.method || 'GET';
-  let response: Response;
-  try {
-    response = await fetch(input, {
-      ...init,
-      headers: {
-        ...authHeaders(),
-        ...(init.headers || {}),
-      },
-    });
-  } catch (error) {
-    console.error('[API] Network request failed', {
-      url: requestUrl,
-      method: requestMethod,
-      error,
-      stack: error instanceof Error ? error.stack : undefined,
-    });
-    const detail = error instanceof TypeError
-      ? `Unable to reach the API at ${requestUrl}. Check the backend process, port, and CORS origins.`
-      : 'Network request failed.';
-    throw new Error(detail, { cause: error });
+  const candidateUrls = new Set<string>([requestUrl]);
+
+  const baseUrl = API_BASE_URL_FALLBACKS.find(base => requestUrl.startsWith(base));
+  if (baseUrl) {
+    for (const candidate of API_BASE_URL_FALLBACKS) {
+      if (candidate !== baseUrl) {
+        candidateUrls.add(requestUrl.replace(baseUrl, candidate));
+      }
+    }
   }
 
-  if (response.status === 401) {
-    if (isRefreshing) {
-      return new Promise((resolve, reject) => {
-        failedQueue.push({ resolve, reject });
-      }).then((token) => {
-        return fetch(input, {
-          ...init,
-          headers: {
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            ...(init.headers || {}),
-          },
-        });
-      }).catch(err => Promise.reject(err));
-    }
+  let lastError: unknown = null;
 
-    isRefreshing = true;
-
+  for (const candidate of Array.from(candidateUrls)) {
     try {
-      const newToken = await refreshAccessToken();
-      processQueue(null, newToken);
-      return fetch(input, {
+      const response = await fetch(candidate, {
         ...init,
         headers: {
-          Authorization: `Bearer ${newToken}`,
+          ...authHeaders(),
           ...(init.headers || {}),
         },
       });
-    } catch (err) {
-      processQueue(err, null);
-      clearTokens();
-      window.location.href = '#/login';
-      return Promise.reject(err);
-    } finally {
-      isRefreshing = false;
+
+      if (response.status === 401) {
+        if (isRefreshing) {
+          return new Promise((resolve, reject) => {
+            failedQueue.push({ resolve, reject });
+          }).then((token) => {
+            return fetch(candidate, {
+              ...init,
+              headers: {
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                ...(init.headers || {}),
+              },
+            });
+          }).catch(err => Promise.reject(err));
+        }
+
+        isRefreshing = true;
+
+        try {
+          const newToken = await refreshAccessToken();
+          processQueue(null, newToken);
+          return fetch(candidate, {
+            ...init,
+            headers: {
+              Authorization: `Bearer ${newToken}`,
+              ...(init.headers || {}),
+            },
+          });
+        } catch (err) {
+          processQueue(err, null);
+          clearTokens();
+          window.location.href = '#/login';
+          return Promise.reject(err);
+        } finally {
+          isRefreshing = false;
+        }
+      }
+
+      if (!response.ok) {
+        const responseHeaders = Object.fromEntries(response.headers.entries());
+        response.clone().text().then(body => {
+          console.error('[API] HTTP request failed', {
+            url: candidate,
+            method: requestMethod,
+            status: response.status,
+            headers: responseHeaders,
+            body,
+          });
+        }).catch(error => {
+          console.error('[API] Failed to read error response body', {
+            url: candidate,
+            method: requestMethod,
+            status: response.status,
+            headers: responseHeaders,
+            error,
+          });
+        });
+      }
+
+      return response;
+    } catch (error) {
+      lastError = error;
+      console.warn('[API] Candidate endpoint failed, retrying alternate origin', {
+        url: candidate,
+        method: requestMethod,
+        error,
+      });
     }
   }
 
-  if (!response.ok) {
-    const responseHeaders = Object.fromEntries(response.headers.entries());
-    response.clone().text().then(body => {
-      console.error('[API] HTTP request failed', {
-        url: requestUrl,
-        method: requestMethod,
-        status: response.status,
-        headers: responseHeaders,
-        body,
-      });
-    }).catch(error => {
-      console.error('[API] Failed to read error response body', {
-        url: requestUrl,
-        method: requestMethod,
-        status: response.status,
-        headers: responseHeaders,
-        error,
-      });
-    });
-  }
-
-  return response;
+  const error = lastError ?? new Error('Network request failed.');
+  console.error('[API] Network request failed', {
+    url: requestUrl,
+    method: requestMethod,
+    error,
+    stack: error instanceof Error ? error.stack : undefined,
+  });
+  const detail = error instanceof TypeError
+    ? `Unable to reach the API at ${requestUrl}. Check the backend process, port, and CORS origins.`
+    : 'Network request failed.';
+  throw new Error(detail, { cause: error });
 };
 
 interface BackendTicketComment {
@@ -883,7 +910,26 @@ export const addCommentApi = async (
   return await response.json() as BackendTicketComment;
 };
 
-export const createTicket = async (ticket: Partial<Ticket>, createdBy?: string, reason?: string): Promise<Ticket> => {
+export const checkDuplicateTicket = async (payload: { title: string; description: string }): Promise<{ status: 'exact' | 'possible' | 'none'; similarity_score: number; ticket?: { id: string; ticket_number: string; title: string; status: string }; message?: string }> => {
+  const response = await apiFetch(`${API_BASE_URL}/tickets/check-duplicate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Unable to check for duplicate tickets: ${response.status}`);
+  }
+
+  return await response.json() as { status: 'exact' | 'possible' | 'none'; similarity_score: number; ticket?: { id: string; ticket_number: string; title: string; status: string }; message?: string };
+};
+
+export const createTicket = async (
+  ticket: Partial<Ticket>,
+  createdBy?: string,
+  reason?: string,
+  duplicateContext?: { duplicateOfTicketId?: string; duplicateStatus?: string; duplicateSimilarityScore?: number },
+): Promise<Ticket> => {
   const params = new URLSearchParams();
   if (reason) params.set('reason', reason);
   
@@ -900,6 +946,9 @@ export const createTicket = async (ticket: Partial<Ticket>, createdBy?: string, 
       created_by: createdBy || ticket.userId,
       ai_summary: ticket.aiSummary,
       resolution: ticket.suggestedResolution || ticket.resolution,
+      duplicate_of_ticket_id: duplicateContext?.duplicateOfTicketId,
+      duplicate_status: duplicateContext?.duplicateStatus,
+      duplicate_similarity_score: duplicateContext?.duplicateSimilarityScore,
     }),
   });
 

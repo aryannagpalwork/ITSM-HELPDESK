@@ -36,7 +36,7 @@ class FakeCollection:
     async def count_documents(self, query=None):
         return sum(1 for row in self.rows if self._matches(row, query or {}))
 
-    async def aggregate(self, pipeline):
+    def aggregate(self, pipeline):
         match = pipeline[0].get("$match", {})
         group = pipeline[1].get("$group", {})
         counts = {}
@@ -173,3 +173,32 @@ class KPIFCRTests(unittest.IsolatedAsyncioTestCase):
 
         metrics = await compute_agent_kpis(db, "agent1")
         self.assertEqual(metrics.agentFcrRate, 0.0)
+
+    async def test_employee_kpis_compute_first_response_from_comments(self):
+        db = self._build_fake_db(
+            tickets=[
+                {
+                    "_id": "emp_t1",
+                    "created_by": "employee1",
+                    "status": "Resolved",
+                    "priority": "High",
+                    "created_at": dt.datetime(2026, 8, 12, 9, 0, 0),
+                    "updated_at": dt.datetime(2026, 8, 12, 10, 0, 0),
+                    "resolved_at": dt.datetime(2026, 8, 12, 10, 0, 0),
+                }
+            ],
+            audit_logs=[],
+            users=[{"_id": "employee1", "role": "Employee", "is_active": True, "status": "ACTIVE", "deleted": False}],
+        )
+        db.ticket_comments = FakeCollection([
+            {
+                "_id": "comment1",
+                "ticket_id": "emp_t1",
+                "created_at": dt.datetime(2026, 8, 12, 9, 30, 0),
+                "author_id": "agent1",
+            }
+        ])
+
+        metrics = await __import__('app.services.kpi', fromlist=['compute_employee_kpis']).compute_employee_kpis(db, "employee1")
+        self.assertEqual(metrics.avgFirstResponseHours, 0.5)
+        self.assertGreaterEqual(metrics.firstResponseSlaCompliance, 0.0)
