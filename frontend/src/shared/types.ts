@@ -79,6 +79,9 @@ export interface TicketComment {
   content: string;
   isInternal: boolean; // true for internal agent-only notes, false for customer-facing
   timestamp: string;
+  attachmentFilename?: string | null;
+  attachmentContentType?: string | null;
+  attachmentSize?: number | null;
 }
 
 export interface KnowledgeArticle {
@@ -105,6 +108,7 @@ export interface SystemAlert {
   relatedTicketIds?: string[] | null;
   windowStart?: string | null;
   windowEnd?: string | null;
+  targetRoles?: string[] | null;
 }
 
 export interface UserNotification {

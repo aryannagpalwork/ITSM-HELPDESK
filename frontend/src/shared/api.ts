@@ -239,6 +239,9 @@ interface BackendTicketComment {
   author_role?: string;
   content: string;
   is_internal: boolean;
+  attachment_filename?: string | null;
+  attachment_content_type?: string | null;
+  attachment_size?: number | null;
   created_at: string;
 }
 
@@ -772,6 +775,9 @@ export const mapTicketComment = (comment: BackendTicketComment): TicketComment =
   content: comment.content,
   isInternal: comment.is_internal,
   timestamp: comment.created_at,
+  attachmentFilename: comment.attachment_filename || null,
+  attachmentContentType: comment.attachment_content_type || null,
+  attachmentSize: comment.attachment_size ?? null,
 });
 
 export const mapTicket = (ticket: BackendTicket): Ticket => ({
@@ -900,7 +906,26 @@ export const addCommentApi = async (
   ticketId: string,
   content: string,
   isInternal: boolean,
+  attachment?: File | null,
 ): Promise<BackendTicketComment> => {
+  const hasAttachment = Boolean(attachment);
+
+  if (hasAttachment) {
+    const formData = new FormData();
+    formData.append('content', content);
+    formData.append('is_internal', String(isInternal));
+    formData.append('attachment', attachment as File);
+
+    const response = await apiFetch(`${API_BASE_URL}/tickets/${ticketId}/comments`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!response.ok) {
+      throw new Error(`Unable to add comment: ${response.status}`);
+    }
+    return await response.json() as BackendTicketComment;
+  }
+
   const response = await apiFetch(`${API_BASE_URL}/tickets/${ticketId}/comments`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -910,6 +935,14 @@ export const addCommentApi = async (
     throw new Error(`Unable to add comment: ${response.status}`);
   }
   return await response.json() as BackendTicketComment;
+};
+
+export const getTicketCommentAttachmentBlob = async (ticketId: string, commentId: string): Promise<Blob> => {
+  const response = await apiFetch(`${API_BASE_URL}/tickets/${ticketId}/comments/${commentId}/attachment`);
+  if (!response.ok) {
+    throw new Error(`Unable to fetch ticket comment attachment: ${response.status}`);
+  }
+  return await response.blob();
 };
 
 export const checkDuplicateTicket = async (payload: { title: string; description: string }): Promise<{ status: 'exact' | 'possible' | 'none'; similarity_score: number; ticket?: { id: string; ticket_number: string; title: string; status: string }; message?: string }> => {
@@ -1439,6 +1472,7 @@ const mapAlertItem = (item: any): SystemAlert => ({
   relatedTicketIds: item.related_ticket_ids,
   windowStart: item.window_start,
   windowEnd: item.window_end,
+  targetRoles: item.target_roles,
 });
 
 const mapNotificationItem = (item: any): UserNotification => ({
@@ -1471,7 +1505,7 @@ export const getAllAlerts = async (): Promise<SystemAlert[]> => {
   return data.map(mapAlertItem);
 };
 
-export const createAlert = async (payload: { title: string; message: string; category?: string }): Promise<SystemAlert> => {
+export const createAlert = async (payload: { title: string; message: string; category?: string; target_roles?: string[] }): Promise<SystemAlert> => {
   const response = await apiFetch(`${API_BASE_URL}/alerts`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

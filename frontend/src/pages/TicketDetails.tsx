@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '../shared/AppContext';
 import { AgentAvailability, Ticket, TicketPriority, TicketStatus } from '../shared/types';
@@ -7,6 +6,8 @@ import {
   Sparkles,
   ArrowLeft,
   Send,
+  Paperclip,
+  Image as ImageIcon,
   Lock,
   UserCircle2,
   Activity,
@@ -22,9 +23,13 @@ import {
   Loader2,
   Check,
 } from 'lucide-react';
-import { AuditLog, getAgentsAvailability, getTicket } from '../shared/api';
+import { AuditLog, getAgentsAvailability, getTicket, getTicketCommentAttachmentBlob } from '../shared/api';
 
 export const TicketDetails: React.FC = () => {
+  const MAX_TICKET_IMAGE_BYTES = 5 * 1024 * 1024;
+  const ALLOWED_TICKET_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+  const ALLOWED_TICKET_IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp'];
+
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const {
@@ -42,15 +47,9 @@ export const TicketDetails: React.FC = () => {
 
   const [commentInput, setCommentInput] = useState('');
   const [isInternalComment, setIsInternalComment] = useState(false);
-
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const autoResize = useCallback(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 192)}px`;
-  }, []);
-  useEffect(() => { autoResize(); }, [commentInput, autoResize]);
+  const [selectedAttachment, setSelectedAttachment] = useState<File | null>(null);
+  const [selectedAttachmentPreviewUrl, setSelectedAttachmentPreviewUrl] = useState<string | null>(null);
+  const [commentAttachmentUrls, setCommentAttachmentUrls] = useState<Record<string, string>>({});
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -69,24 +68,48 @@ export const TicketDetails: React.FC = () => {
   });
   const [agents, setAgents] = useState<AgentAvailability[]>([]);
   const [fetchedTicket, setFetchedTicket] = useState<Ticket | null>(null);
+  const [isTicketLoading, setIsTicketLoading] = useState(true);
   const [draftStatus, setDraftStatus] = useState<TicketStatus | null>(null);
   const [draftPriority, setDraftPriority] = useState<TicketPriority | null>(null);
   const [draftResolution, setDraftResolution] = useState<string | undefined>();
   const [lifecycleReason, setLifecycleReason] = useState<string | undefined>();
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
+  const commentAttachmentUrlRef = useRef<Record<string, string>>({});
 
   const ticket = tickets.find((t) => t.id === id) || fetchedTicket;
 
   useEffect(() => {
-    if (ticket || !id) return;
     let active = true;
+
+    if (!id) {
+      setIsTicketLoading(false);
+      return;
+    }
+
+    if (ticket) {
+      setIsTicketLoading(false);
+      return;
+    }
+
+    setIsTicketLoading(true);
+
     getTicket(id)
       .then((loaded) => {
-        if (active) setFetchedTicket(loaded);
+        if (!active) return;
+        setFetchedTicket(loaded);
       })
-      .catch(() => {
-        if (active) setFetchedTicket(null);
+      .catch((error) => {
+        console.error('Unable to load ticket:', error);
+        if (!active) return;
+        setFetchedTicket(null);
+      })
+      .finally(() => {
+        if (active) setIsTicketLoading(false);
       });
-    return () => { active = false; };
+
+    return () => {
+      active = false;
+    };
   }, [id, ticket?.id]);
 
   useEffect(() => {
@@ -109,38 +132,139 @@ export const TicketDetails: React.FC = () => {
     }
   }, [toast]);
 
-  if (!ticket) {
-    return (
-      <div className="flex-1 bg-app p-8 flex flex-col items-center justify-center h-full font-sans">
-        <AlertTriangle className="w-12 h-12 text-rose-500 mb-3" />
-        <h2 className="text-sm font-bold text-primary">Incident Record Not Found</h2>
-        <p className="text-xs text-tertiary mt-1 max-w-sm text-center">
-          The incident ticket you are trying to access does not exist or has been removed from the database.
-        </p>
-        <button
-          onClick={() => {
-            if (currentUser.role === 'Agent') navigate('/agent/tickets');
-            else if (currentUser.role === 'Administrator') navigate('/admin/tickets');
-            else navigate('/tickets');
-          }}
-          className="mt-6 px-4 py-2 bg-card-solid border border-token rounded-lg text-xs font-semibold text-secondary hover-text transition-all cursor-pointer"
-        >
-          Return to Queue
-        </button>
-      </div>
-    );
-  }
+  // Filter Comments: Normal users cannot see internal notes.
+  // Keep this hook-safe by deriving an empty list until the ticket has loaded.
+  const filteredComments = useMemo(() => {
+    if (!ticket) return [];
 
-  // Filter Comments: Normal users cannot see internal notes!
-  const filteredComments = comments
-    .filter((c) => c.ticketId === ticket.id)
-    .filter((c) => currentUser.role !== 'Employee' || !c.isInternal);
+    return comments
+      .filter((c) => c.ticketId === ticket.id)
+      .filter((c) => currentUser.role !== 'Employee' || !c.isInternal);
+  }, [comments, ticket?.id, currentUser.role]);
 
-  const displayedStatus = draftStatus ?? ticket.status;
-  const displayedPriority = draftPriority ?? ticket.priority;
-  const lifecycleDirty = displayedStatus !== ticket.status
-    || displayedPriority !== ticket.priority
-    || draftResolution !== undefined;
+  useEffect(() => {
+    if (!selectedAttachment) {
+      setSelectedAttachmentPreviewUrl(null);
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(selectedAttachment);
+    setSelectedAttachmentPreviewUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [selectedAttachment]);
+
+  useEffect(() => {
+    const activeCommentIds = new Set(filteredComments.filter((comment) => comment.attachmentFilename).map((comment) => comment.id));
+    setCommentAttachmentUrls((current) => {
+      const next = { ...current };
+      let hasChanges = false;
+      Object.entries(current).forEach(([commentId, objectUrl]) => {
+        if (!activeCommentIds.has(commentId)) {
+          URL.revokeObjectURL(objectUrl);
+          delete next[commentId];
+          delete commentAttachmentUrlRef.current[commentId];
+          hasChanges = true;
+        }
+      });
+      return hasChanges ? next : current;
+    });
+  }, [filteredComments]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadCommentAttachments = async () => {
+      const missingComments = filteredComments.filter(
+        (comment) => comment.attachmentFilename && !commentAttachmentUrlRef.current[comment.id],
+      );
+
+      if (!missingComments.length) {
+        return;
+      }
+
+      const attachmentPairs = await Promise.allSettled(
+        missingComments.map(async (comment) => {
+          const blob = await getTicketCommentAttachmentBlob(comment.ticketId, comment.id);
+          return [comment.id, URL.createObjectURL(blob)] as const;
+        }),
+      );
+
+      if (cancelled) {
+        attachmentPairs.forEach((result) => {
+          if (result.status === 'fulfilled') {
+            URL.revokeObjectURL(result.value[1]);
+          }
+        });
+        return;
+      }
+
+      setCommentAttachmentUrls((current) => {
+        const next = { ...current };
+        attachmentPairs.forEach((result) => {
+          if (result.status === 'fulfilled') {
+            const [commentId, objectUrl] = result.value;
+            next[commentId] = objectUrl;
+            commentAttachmentUrlRef.current[commentId] = objectUrl;
+          } else {
+            console.warn('Unable to load ticket comment attachment.', result.reason);
+          }
+        });
+        return next;
+      });
+    };
+
+    loadCommentAttachments().catch((error) => {
+      console.warn('Unable to load ticket comment attachment.', error);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [filteredComments]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(commentAttachmentUrlRef.current).forEach((objectUrl) => URL.revokeObjectURL(objectUrl));
+      commentAttachmentUrlRef.current = {};
+    };
+  }, []);
+
+  const validateSelectedAttachment = (file: File): string | null => {
+    const extension = file.name.split('.').pop()?.toLowerCase() || '';
+    const mimeType = file.type.toLowerCase();
+    if (!ALLOWED_TICKET_IMAGE_EXTENSIONS.includes(extension)) {
+      return 'Only PNG, JPG, JPEG, and WEBP images are allowed.';
+    }
+    if (mimeType && !ALLOWED_TICKET_IMAGE_TYPES.includes(mimeType)) {
+      return 'Only PNG, JPG, JPEG, and WEBP images are allowed.';
+    }
+    if (file.size > MAX_TICKET_IMAGE_BYTES) {
+      return 'Image attachments must be 5 MB or smaller.';
+    }
+    return null;
+  };
+
+  const clearSelectedAttachment = () => {
+    setSelectedAttachment(null);
+    if (attachmentInputRef.current) {
+      attachmentInputRef.current.value = '';
+    }
+  };
+
+  const handleAttachmentChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] || null;
+    if (!file) {
+      return;
+    }
+
+    const validationMessage = validateSelectedAttachment(file);
+    if (validationMessage) {
+      setToast({ message: validationMessage, type: 'error' });
+      event.target.value = '';
+      return;
+    }
+
+    setSelectedAttachment(file);
+  };
 
   const handleStatusChange = (status: TicketStatus) => setDraftStatus(status);
 
@@ -154,7 +278,7 @@ export const TicketDetails: React.FC = () => {
   };
 
   const handleSaveLifecycle = async () => {
-    if (!lifecycleDirty) return;
+    if (!ticket || !lifecycleDirty) return;
     setLoading('save-lifecycle');
     try {
       const updates: Partial<Ticket> = { status: displayedStatus };
@@ -197,20 +321,31 @@ export const TicketDetails: React.FC = () => {
 
   const handleSubmitComment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!commentInput.trim() || !ticket) return;
+    const message = commentInput.trim();
+    if (((!message && !selectedAttachment) || !ticket)) return;
 
-    await addComment(ticket.id, commentInput, isInternalComment);
-    setCommentInput('');
-    setIsInternalComment(false);
+    try {
+      await addComment(ticket.id, message, isInternalComment, selectedAttachment);
+      setCommentInput('');
+      setIsInternalComment(false);
+      clearSelectedAttachment();
 
-    // Reload ticket data (backend auto-transitions awaiting_user_response → in_progress
-    // when an employee sends a non-internal comment)
-    await loadTickets();
-    // Reload audit logs so the new comment + any status change appear in the timeline
-    loadTicketAuditLogs(ticket.id).then(setAuditLogs);
+      // Reload ticket data (backend auto-transitions awaiting_user_response → in_progress
+      // when an employee sends a non-internal comment)
+      await loadTickets();
+      // Reload audit logs so the new comment + any status change appear in the timeline
+      loadTicketAuditLogs(ticket.id).then(setAuditLogs);
+    } catch (error) {
+      console.error(error);
+      setToast({
+        message: error instanceof Error ? error.message : 'Unable to send comment. Please try again.',
+        type: 'error',
+      });
+    }
   };
 
   const handleDelete = () => {
+    if (!ticket) return;
     if (confirm('Are you absolutely sure you want to permanently delete this support incident?')) {
       deleteTicket(ticket.id);
       // Return to role-specific ticket queue
@@ -373,10 +508,50 @@ export const TicketDetails: React.FC = () => {
 
   const canEditMetadata = currentUser.role !== 'Employee';
 
+  // All hooks above must run on every render. Only decide what to display after
+  // the complete hook block so refreshes cannot change hook order.
+  if (isTicketLoading) {
+    return (
+      <div className="flex-1 bg-app p-8 flex flex-col items-center justify-center h-full font-sans">
+        <Loader2 className="w-6 h-6 text-accent animate-spin mb-3" />
+        <p className="text-xs text-secondary">Loading incident...</p>
+      </div>
+    );
+  }
+
+  if (!ticket) {
+    return (
+      <div className="flex-1 bg-app p-8 flex flex-col items-center justify-center h-full font-sans">
+        <AlertTriangle className="w-12 h-12 text-rose-500 mb-3" />
+        <h2 className="text-sm font-bold text-primary">Incident Record Not Found</h2>
+        <p className="text-xs text-tertiary mt-1 max-w-sm text-center">
+          The incident ticket you are trying to access does not exist or has been removed from the database.
+        </p>
+        <button
+          onClick={() => {
+            if (currentUser.role === 'Agent') navigate('/agent/tickets');
+            else if (currentUser.role === 'Administrator') navigate('/admin/tickets');
+            else navigate('/tickets');
+          }}
+          className="mt-6 px-4 py-2 bg-card-solid border border-token rounded-lg text-xs font-semibold text-secondary hover-text transition-all cursor-pointer"
+        >
+          Return to Queue
+        </button>
+      </div>
+    );
+  }
+
+  // Safe from here on: the guards above guarantee `ticket` is non-null.
+  const displayedStatus = draftStatus ?? ticket.status;
+  const displayedPriority = draftPriority ?? ticket.priority;
+  const lifecycleDirty = displayedStatus !== ticket.status
+    || displayedPriority !== ticket.priority
+    || draftResolution !== undefined;
+
   return (
     <div
       id="ticket-workspace-details"
-      className="flex-1 bg-app p-4 sm:p-6 lg:p-8 overflow-y-auto h-full font-sans flex flex-col justify-between relative"
+      className="flex-1 bg-app p-8 overflow-y-auto h-full font-sans flex flex-col justify-between relative"
     >
       {/* Toast Notification */}
       {toast && (
@@ -842,6 +1017,37 @@ export const TicketDetails: React.FC = () => {
                       <p className="text-xs text-secondary mt-1.5 leading-relaxed font-sans whitespace-pre-line">
                         {comment.content}
                       </p>
+                      {comment.attachmentFilename && (
+                        <div className="mt-3 space-y-2">
+                          <p className="text-[10px] font-mono uppercase tracking-wider text-tertiary">
+                            Attachment: {comment.attachmentFilename}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const attachmentUrl = commentAttachmentUrls[comment.id];
+                              if (attachmentUrl) {
+                                window.open(attachmentUrl, '_blank', 'noopener,noreferrer');
+                              }
+                            }}
+                            className="group block overflow-hidden rounded-xl border border-token bg-input text-left transition-all hover:border-[var(--accent-primary)]"
+                            title="Open image in new tab"
+                          >
+                            {commentAttachmentUrls[comment.id] ? (
+                              <img
+                                src={commentAttachmentUrls[comment.id]}
+                                alt={comment.attachmentFilename}
+                                className="max-h-72 w-full object-contain bg-black/20"
+                              />
+                            ) : (
+                              <div className="flex h-36 items-center justify-center gap-2 text-tertiary">
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                <span className="text-[10px] font-mono uppercase tracking-wider">Loading image</span>
+                              </div>
+                            )}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1116,18 +1322,64 @@ export const TicketDetails: React.FC = () => {
       {/* Reply input field (bottom layout stick) */}
       <div className="mt-8 border-t border-token pt-6">
         <form onSubmit={handleSubmitComment} className="space-y-3 max-w-4xl">
-          <div className="bg-card border border-token rounded-2xl p-1.5 flex items-end focus-within:border-[var(--accent-primary)] transition-colors">
-            <textarea
-              ref={textareaRef}
+          {selectedAttachment && (
+            <div className="flex items-center justify-between gap-3 rounded-2xl border border-token bg-card p-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-token bg-input">
+                  {selectedAttachmentPreviewUrl ? (
+                    <img
+                      src={selectedAttachmentPreviewUrl}
+                      alt={selectedAttachment.name}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center">
+                      <ImageIcon className="h-5 w-5 text-tertiary" />
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-semibold text-primary">{selectedAttachment.name}</p>
+                  <p className="mt-0.5 text-[10px] text-tertiary">
+                    {(selectedAttachment.size / 1024 / 1024).toFixed(2)} MB
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={clearSelectedAttachment}
+                className="rounded-lg border border-token px-3 py-1.5 text-[10px] font-semibold text-secondary hover-text hover-surface"
+              >
+                Remove
+              </button>
+            </div>
+          )}
+
+          <div className="bg-card border border-token rounded-2xl p-1.5 flex items-center focus-within:border-[var(--accent-primary)] transition-colors">
+            <input
+              id="ticket-image-upload"
+              ref={attachmentInputRef}
+              type="file"
+              accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+              className="hidden"
+              onChange={handleAttachmentChange}
+            />
+            <label
+              htmlFor="ticket-image-upload"
+              className="inline-flex cursor-pointer items-center justify-center p-3 text-secondary hover-text transition-colors shrink-0"
+              aria-label="Attach image"
+              title="Attach image"
+            >
+              <Paperclip className="w-3.5 h-3.5" />
+            </label>
+            <input
               id="ticket-comment"
               name="comment"
+              type="text"
               placeholder={isInternalComment ? "Add a private internal technician note..." : "Post a response to the requester..."}
               value={commentInput}
               onChange={(e) => setCommentInput(e.target.value)}
-              onInput={autoResize}
-              rows={1}
-              className="flex-1 bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-xs text-primary px-3.5 py-3 resize-none max-h-48"
-              style={{ height: 'auto', overflowY: 'auto' }}
+              className="w-full bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-xs text-primary px-3.5 py-3"
             />
             <button
               type="submit"

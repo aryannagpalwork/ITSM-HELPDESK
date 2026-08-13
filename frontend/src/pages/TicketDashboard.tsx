@@ -246,14 +246,15 @@ export const TicketDashboard: React.FC = () => {
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               className="w-full bg-transparent border-none text-xs text-secondary focus:ring-0 focus:outline-none outline-none py-1 cursor-pointer"
+              style={{ colorScheme: 'dark' }}
             >
-  <option value="all">All statuses</option>
-  <option value="open">Open</option>
-  <option value="in_progress">In Progress</option>
-  <option value="waiting_for_user_response">Waiting for User Response</option>
-  <option value="resolved">Resolved</option>
-  <option value="closed">Closed</option>
-              {currentUser.role === 'Administrator' && <option value="resolved_ai">Resolved by AI</option>}
+  <option value="all" className="bg-card-solid text-secondary">All statuses</option>
+  <option value="open" className="bg-card-solid text-secondary">Open</option>
+  <option value="in_progress" className="bg-card-solid text-secondary">In Progress</option>
+  <option value="waiting_for_user_response" className="bg-card-solid text-secondary">Waiting for User Response</option>
+  <option value="resolved" className="bg-card-solid text-secondary">Resolved</option>
+  <option value="closed" className="bg-card-solid text-secondary">Closed</option>
+              {currentUser.role === 'Administrator' && <option value="resolved_ai" className="bg-card-solid text-secondary">Resolved by AI</option>}
             </select>
           </div>
 
@@ -266,12 +267,13 @@ export const TicketDashboard: React.FC = () => {
               value={priorityFilter}
               onChange={(e) => setPriorityFilter(e.target.value)}
               className="w-full bg-transparent border-none text-xs text-secondary focus:ring-0 focus:outline-none outline-none py-1 cursor-pointer"
+              style={{ colorScheme: 'dark' }}
             >
-              <option value="all">All priorities</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="critical">Critical</option>
+              <option value="all" className="bg-card-solid text-secondary">All priorities</option>
+              <option value="low" className="bg-card-solid text-secondary">Low</option>
+              <option value="medium" className="bg-card-solid text-secondary">Medium</option>
+              <option value="high" className="bg-card-solid text-secondary">High</option>
+              <option value="critical" className="bg-card-solid text-secondary">Critical</option>
             </select>
           </div>
 
@@ -284,10 +286,11 @@ export const TicketDashboard: React.FC = () => {
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value)}
               className="w-full bg-transparent border-none text-xs text-secondary focus:ring-0 focus:outline-none outline-none py-1 cursor-pointer"
+              style={{ colorScheme: 'dark' }}
             >
-              <option value="newest">Newest first</option>
-              <option value="oldest">Oldest first</option>
-              <option value="priority">Priority: High-Low</option>
+              <option value="newest" className="bg-card-solid text-secondary">Newest first</option>
+              <option value="oldest" className="bg-card-solid text-secondary">Oldest first</option>
+              <option value="priority" className="bg-card-solid text-secondary">Priority: High-Low</option>
             </select>
           </div>
 
