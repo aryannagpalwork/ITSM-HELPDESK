@@ -142,7 +142,7 @@ export const AdminDashboard: React.FC = () => {
   const slaCompliance = slaResolved ? Math.round((slaWithin / slaResolved) * 100) : 0;
 
   return (
-    <div id="admin-command-center" className="flex-1 bg-app p-8 overflow-y-auto h-full font-sans">
+    <div id="admin-command-center" className="flex-1 bg-app p-4 sm:p-6 lg:p-8 overflow-y-auto h-full font-sans">
 
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
         <div>

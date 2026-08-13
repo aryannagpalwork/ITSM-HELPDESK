@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useApp } from '../../shared/AppContext';
+import { useSidebar } from '../../shared/SidebarContext';
 import { 
   LayoutDashboard, 
   MessageSquareCode, 
@@ -15,9 +16,11 @@ export const EmployeeSidebar: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { currentUser, logout } = useApp();
+  const { setOpen } = useSidebar();
 
   const handleNavigation = (path: string) => {
     navigate(path);
+    setOpen(false);
   };
 
   const navItems = [

@@ -25,7 +25,7 @@ export const Settings: React.FC = () => {
   };
 
   return (
-    <div id="settings-workspace" className="flex-1 bg-app p-8 overflow-y-auto h-full font-sans">
+    <div id="settings-workspace" className="flex-1 bg-app p-4 sm:p-6 lg:p-8 overflow-y-auto h-full font-sans">
       
       {/* Upper header */}
       <div className="mb-8">

@@ -96,7 +96,7 @@ export const AgentLeave: React.FC = () => {
   }
 
   return (
-    <div className="flex-1 bg-app p-8 overflow-y-auto h-full font-sans">
+    <div className="flex-1 bg-app p-4 sm:p-6 lg:p-8 overflow-y-auto h-full font-sans">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
         <div>
           <span className="text-[10px] font-mono tracking-widest uppercase text-tertiary flex items-center gap-1.5 font-semibold">

@@ -148,8 +148,11 @@ export const ThemeSelector: React.FC<{ compact?: boolean }> = ({ compact = false
         </button>
         {open && (
           <div
-            className="absolute right-0 mt-2 w-[340px] max-h-[calc(100vh-5rem)] overflow-y-auto overscroll-contain rounded-2xl shadow-2xl z-50 p-3 space-y-3"
-            style={{ backgroundColor: 'var(--card-bg-solid)', border: '1px solid var(--border)' }}
+            className="absolute right-0 mt-2 w-[340px] max-w-[calc(100vw-2rem)] max-h-[calc(100vh-5rem)] overflow-y-auto overscroll-contain rounded-2xl shadow-2xl z-50 p-3 space-y-3 theme-scroller"
+            style={{
+              backgroundColor: 'var(--card-bg-solid)',
+              border: '1px solid var(--border)',
+            } as React.CSSProperties}
           >
             <div className="flex items-center justify-between px-1">
               <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: 'var(--text-tertiary)' }}>
@@ -256,7 +259,7 @@ export const ThemeSelector: React.FC<{ compact?: boolean }> = ({ compact = false
       </button>
       {open && (
         <div
-          className="absolute right-0 mt-2 w-[400px] max-h-[calc(100vh-5rem)] overflow-y-auto overscroll-contain rounded-2xl shadow-2xl z-50 p-4 space-y-3.5"
+          className="absolute right-0 mt-2 w-[400px] max-w-[calc(100vw-2rem)] max-h-[calc(100vh-5rem)] overflow-y-auto overscroll-contain rounded-2xl shadow-2xl z-50 p-4 space-y-3.5 theme-scroller"
           style={{ backgroundColor: 'var(--card-bg-solid)', border: '1px solid var(--border)' }}
         >
           <div className="flex items-center justify-between px-1">

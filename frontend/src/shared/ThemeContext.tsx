@@ -13,13 +13,7 @@ export type ThemeId =
   | 'dark-navy'
   | 'light'
   | 'charcoal'
-  | 'warm-slate'
-  | 'teal-night'
-  | 'forest'
-  | 'ocean'
-  | 'purple'
-  | 'corporate-blue'
-  | 'soft-black';
+  | 'warm-slate';
 
 /** The complete set of CSS custom properties every theme must define. */
 export interface ThemeTokens {
@@ -165,120 +159,6 @@ const RAW_THEMES: RawTheme[] = [
       '--status-info': '#fbbf24', '--status-info-bg': 'rgba(251, 191, 36, 0.14)',
       '--chart-1': '#d97706', '--chart-2': '#84cc16', '--chart-3': '#facc15', '--chart-4': '#fb7185', '--chart-5': '#a78bfa', '--chart-6': '#22d3ee',
       '--scroll-track': 'transparent', '--scroll-thumb': 'rgba(95, 77, 63, 0.55)', '--scroll-thumb-hover': 'rgba(125, 102, 82, 0.75)', '--scrollbar': 'rgba(95, 77, 63, 0.55)',
-    },
-  },
-  {
-    id: 'teal-night',
-    name: 'Teal Night',
-    tokens: {
-      '--app-bg': '#042f2e', '--surface-bg': '#083b3a', '--card-bg': 'rgba(13, 64, 62, 0.55)', '--card-bg-solid': '#0d403e',
-      '--sidebar-bg': '#022524', '--sidebar-hover': '#084b49', '--sidebar-active': '#084b49', '--navbar-bg': '#063533',
-      '--border': '#115e59', '--border-strong': '#14b8a6',
-      '--text-primary': '#ccfbf1', '--text-secondary': '#7dd3c9', '--text-tertiary': '#5eead4',
-      '--accent-primary': '#2dd4bf', '--accent-primary-hover': '#5eead4', '--accent-primary-bg': 'rgba(45, 212, 191, 0.14)', '--accent-primary-contrast': '#042f2e',
-      '--accent-secondary': '#06b6d4', '--accent-secondary-bg': 'rgba(6, 182, 212, 0.14)',
-      '--hover': 'rgba(20, 184, 166, 0.08)', '--input-bg': 'rgba(13, 64, 62, 0.90)',
-      '--status-success': '#34d399', '--status-success-bg': 'rgba(52, 211, 153, 0.16)',
-      '--status-warning': '#fbbf24', '--status-warning-bg': 'rgba(251, 191, 36, 0.14)',
-      '--status-error': '#fb7185', '--status-error-bg': 'rgba(251, 113, 133, 0.16)',
-      '--status-info': '#67e8f9', '--status-info-bg': 'rgba(103, 232, 249, 0.16)',
-      '--chart-1': '#2dd4bf', '--chart-2': '#34d399', '--chart-3': '#fbbf24', '--chart-4': '#f472b6', '--chart-5': '#38bdf8', '--chart-6': '#a78bfa',
-      '--scroll-track': 'transparent', '--scroll-thumb': 'rgba(20, 184, 166, 0.35)', '--scroll-thumb-hover': 'rgba(45, 212, 191, 0.55)', '--scrollbar': 'rgba(20, 184, 166, 0.35)',
-    },
-  },
-  {
-    id: 'forest',
-    name: 'Mauve Canvas',
-    tokens: {
-      '--app-bg': '#f5eff3', '--surface-bg': '#eee3e9', '--card-bg': 'rgba(255, 251, 253, 0.90)', '--card-bg-solid': '#fffafd',
-      '--sidebar-bg': '#e9dce3', '--sidebar-hover': '#ded0d9', '--sidebar-active': '#ded0d9', '--navbar-bg': '#f1e7ed',
-      '--border': '#c7b3bf', '--border-strong': '#a98497',
-      '--text-primary': '#30242c', '--text-secondary': '#5f4b57', '--text-tertiary': '#806875',
-      '--accent-primary': '#765b88', '--accent-primary-hover': '#624a72', '--accent-primary-bg': 'rgba(118, 91, 136, 0.12)', '--accent-primary-contrast': '#ffffff',
-      '--accent-secondary': '#387a86', '--accent-secondary-bg': 'rgba(56, 122, 134, 0.11)',
-      '--hover': 'rgba(48, 36, 44, 0.06)', '--input-bg': '#fff9fb',
-      '--status-success': '#2f7665', '--status-success-bg': 'rgba(47, 118, 101, 0.11)',
-      '--status-warning': '#98621b', '--status-warning-bg': 'rgba(152, 98, 27, 0.11)',
-      '--status-error': '#ad4561', '--status-error-bg': 'rgba(173, 69, 97, 0.10)',
-      '--status-info': '#3f6598', '--status-info-bg': 'rgba(63, 101, 152, 0.10)',
-      '--chart-1': '#765b88', '--chart-2': '#387a86', '--chart-3': '#98621b', '--chart-4': '#ad4561', '--chart-5': '#3f6598', '--chart-6': '#75845c',
-      '--scroll-track': 'transparent', '--scroll-thumb': 'rgba(128, 104, 117, 0.42)', '--scroll-thumb-hover': 'rgba(95, 75, 87, 0.60)', '--scrollbar': 'rgba(128, 104, 117, 0.42)',
-    },
-  },
-  {
-    id: 'ocean',
-    name: 'Ocean',
-    tokens: {
-      '--app-bg': '#0b1b2b', '--surface-bg': '#0e2236', '--card-bg': 'rgba(15, 33, 56, 0.55)', '--card-bg-solid': '#12243d',
-      '--sidebar-bg': '#081422', '--sidebar-hover': '#123049', '--sidebar-active': '#123049', '--navbar-bg': '#0c1d30',
-      '--border': '#1e3a5f', '--border-strong': '#2b5486',
-      '--text-primary': '#e0f2fe', '--text-secondary': '#9fc1de', '--text-tertiary': '#6b8fb3',
-      '--accent-primary': '#38bdf8', '--accent-primary-hover': '#7dd3fc', '--accent-primary-bg': 'rgba(56, 189, 248, 0.12)', '--accent-primary-contrast': '#0b1b2b',
-      '--accent-secondary': '#0ea5e9', '--accent-secondary-bg': 'rgba(14, 165, 233, 0.12)',
-      '--hover': 'rgba(56, 189, 248, 0.08)', '--input-bg': 'rgba(15, 33, 56, 0.90)',
-      '--status-success': '#2dd4bf', '--status-success-bg': 'rgba(45, 212, 191, 0.14)',
-      '--status-warning': '#fbbf24', '--status-warning-bg': 'rgba(251, 191, 36, 0.12)',
-      '--status-error': '#fb7185', '--status-error-bg': 'rgba(251, 113, 133, 0.14)',
-      '--status-info': '#60a5fa', '--status-info-bg': 'rgba(96, 165, 250, 0.14)',
-      '--chart-1': '#38bdf8', '--chart-2': '#2dd4bf', '--chart-3': '#818cf8', '--chart-4': '#f472b6', '--chart-5': '#0ea5e9', '--chart-6': '#a78bfa',
-      '--scroll-track': 'transparent', '--scroll-thumb': 'rgba(56, 189, 248, 0.30)', '--scroll-thumb-hover': 'rgba(56, 189, 248, 0.50)', '--scrollbar': 'rgba(56, 189, 248, 0.30)',
-    },
-  },
-  {
-    id: 'purple',
-    name: 'Purple',
-    tokens: {
-      '--app-bg': '#180f2b', '--surface-bg': '#211436', '--card-bg': 'rgba(38, 22, 60, 0.55)', '--card-bg-solid': '#281840',
-      '--sidebar-bg': '#130a24', '--sidebar-hover': '#2c1a47', '--sidebar-active': '#2c1a47', '--navbar-bg': '#1b1030',
-      '--border': '#3b2560', '--border-strong': '#5b3a8f',
-      '--text-primary': '#f3e8ff', '--text-secondary': '#c4b5db', '--text-tertiary': '#9a86b8',
-      '--accent-primary': '#a855f7', '--accent-primary-hover': '#c084fc', '--accent-primary-bg': 'rgba(168, 85, 247, 0.14)', '--accent-primary-contrast': '#ffffff',
-      '--accent-secondary': '#d946ef', '--accent-secondary-bg': 'rgba(217, 70, 239, 0.12)',
-      '--hover': 'rgba(168, 85, 247, 0.08)', '--input-bg': 'rgba(38, 22, 60, 0.90)',
-      '--status-success': '#34d399', '--status-success-bg': 'rgba(52, 211, 153, 0.14)',
-      '--status-warning': '#fbbf24', '--status-warning-bg': 'rgba(251, 191, 36, 0.12)',
-      '--status-error': '#fb7185', '--status-error-bg': 'rgba(251, 113, 133, 0.14)',
-      '--status-info': '#818cf8', '--status-info-bg': 'rgba(129, 140, 248, 0.14)',
-      '--chart-1': '#a855f7', '--chart-2': '#d946ef', '--chart-3': '#818cf8', '--chart-4': '#34d399', '--chart-5': '#f472b6', '--chart-6': '#38bdf8',
-      '--scroll-track': 'transparent', '--scroll-thumb': 'rgba(168, 85, 247, 0.30)', '--scroll-thumb-hover': 'rgba(168, 85, 247, 0.50)', '--scrollbar': 'rgba(168, 85, 247, 0.30)',
-    },
-  },
-  {
-    id: 'corporate-blue',
-    name: 'Corporate Blue',
-    tokens: {
-      '--app-bg': '#0f172a', '--surface-bg': '#152036', '--card-bg': 'rgba(30, 41, 59, 0.50)', '--card-bg-solid': '#1e293b',
-      '--sidebar-bg': '#0b1220', '--sidebar-hover': '#1c2942', '--sidebar-active': '#1c2942', '--navbar-bg': '#111c30',
-      '--border': '#334155', '--border-strong': '#475569',
-      '--text-primary': '#f1f5f9', '--text-secondary': '#cbd5e1', '--text-tertiary': '#94a3b8',
-      '--accent-primary': '#3b82f6', '--accent-primary-hover': '#60a5fa', '--accent-primary-bg': 'rgba(59, 130, 246, 0.12)', '--accent-primary-contrast': '#ffffff',
-      '--accent-secondary': '#0ea5e9', '--accent-secondary-bg': 'rgba(14, 165, 233, 0.12)',
-      '--hover': 'rgba(148, 163, 184, 0.10)', '--input-bg': 'rgba(30, 41, 59, 0.85)',
-      '--status-success': '#22c55e', '--status-success-bg': 'rgba(34, 197, 94, 0.12)',
-      '--status-warning': '#f59e0b', '--status-warning-bg': 'rgba(245, 158, 11, 0.12)',
-      '--status-error': '#ef4444', '--status-error-bg': 'rgba(239, 68, 68, 0.12)',
-      '--status-info': '#38bdf8', '--status-info-bg': 'rgba(56, 189, 248, 0.12)',
-      '--chart-1': '#3b82f6', '--chart-2': '#0ea5e9', '--chart-3': '#22c55e', '--chart-4': '#f59e0b', '--chart-5': '#8b5cf6', '--chart-6': '#14b8a6',
-      '--scroll-track': 'transparent', '--scroll-thumb': 'rgba(71, 85, 105, 0.45)', '--scroll-thumb-hover': 'rgba(100, 116, 139, 0.65)', '--scrollbar': 'rgba(71, 85, 105, 0.45)',
-    },
-  },
-  {
-    id: 'soft-black',
-    name: 'Ivory Bloom',
-    tokens: {
-      '--app-bg': '#f7f3eb', '--surface-bg': '#eee7da', '--card-bg': 'rgba(255, 253, 248, 0.88)', '--card-bg-solid': '#fffdf8',
-      '--sidebar-bg': '#ebe2d3', '--sidebar-hover': '#e0d5c4', '--sidebar-active': '#e0d5c4', '--navbar-bg': '#f2ebdf',
-      '--border': '#c9bdaa', '--border-strong': '#a99a84',
-      '--text-primary': '#28231d', '--text-secondary': '#50473d', '--text-tertiary': '#706354',
-      '--accent-primary': '#006d77', '--accent-primary-hover': '#005b63', '--accent-primary-bg': 'rgba(0, 109, 119, 0.11)', '--accent-primary-contrast': '#ffffff',
-      '--accent-secondary': '#b4533c', '--accent-secondary-bg': 'rgba(180, 83, 60, 0.10)',
-      '--hover': 'rgba(40, 35, 29, 0.06)', '--input-bg': '#fffcf6',
-      '--status-success': '#087e5b', '--status-success-bg': 'rgba(8, 126, 91, 0.11)',
-      '--status-warning': '#a65b00', '--status-warning-bg': 'rgba(166, 91, 0, 0.11)',
-      '--status-error': '#bd3654', '--status-error-bg': 'rgba(189, 54, 84, 0.10)',
-      '--status-info': '#2364a3', '--status-info-bg': 'rgba(35, 100, 163, 0.10)',
-      '--chart-1': '#006d77', '--chart-2': '#087e5b', '--chart-3': '#a65b00', '--chart-4': '#bd3654', '--chart-5': '#2364a3', '--chart-6': '#805ad5',
-      '--scroll-track': 'transparent', '--scroll-thumb': 'rgba(112, 99, 84, 0.40)', '--scroll-thumb-hover': 'rgba(80, 71, 61, 0.58)', '--scrollbar': 'rgba(112, 99, 84, 0.40)',
     },
   },
 ];

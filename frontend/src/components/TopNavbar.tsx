@@ -1,7 +1,8 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LayoutDashboard, UserCircle2 } from 'lucide-react';
+import { LayoutDashboard, UserCircle2, Menu } from 'lucide-react';
 import { useApp } from '../shared/AppContext';
+import { useSidebar } from '../shared/SidebarContext';
 import { ThemeSelector } from '../shared/ThemeSelector';
 import { NotificationCenter } from './NotificationCenter';
 
@@ -13,6 +14,7 @@ import { NotificationCenter } from './NotificationCenter';
 export const TopNavbar: React.FC<{ title?: string }> = ({ title }) => {
   const navigate = useNavigate();
   const { currentUser } = useApp();
+  const { toggle } = useSidebar();
 
   const getOverviewPath = () => {
     switch (currentUser.role) {
@@ -25,13 +27,24 @@ export const TopNavbar: React.FC<{ title?: string }> = ({ title }) => {
 
   return (
     <header
-      className="shrink-0 h-14 flex items-center justify-between px-4 sm:px-6 z-30"
+      className="shrink-0 h-14 flex items-center justify-between px-3 sm:px-6 z-30"
       style={{
         backgroundColor: 'var(--navbar-bg)',
         borderBottom: '1px solid var(--border)',
       }}
     >
       <div className="flex items-center gap-2 min-w-0">
+        <button
+          type="button"
+          onClick={toggle}
+          className="md:hidden p-1.5 rounded-lg transition-colors cursor-pointer"
+          style={{ color: 'var(--text-secondary)' }}
+          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--hover)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+          aria-label="Toggle sidebar"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
         <span
           className="text-[11px] font-mono uppercase tracking-widest truncate"
           style={{ color: 'var(--text-tertiary)' }}
@@ -40,7 +53,7 @@ export const TopNavbar: React.FC<{ title?: string }> = ({ title }) => {
         </span>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 sm:gap-3">
         {currentUser.role !== 'Administrator' && <NotificationCenter />}
         <ThemeSelector />
         <button

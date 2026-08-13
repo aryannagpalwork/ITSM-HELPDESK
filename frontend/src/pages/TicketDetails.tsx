@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '../shared/AppContext';
 import { AgentAvailability, Ticket, TicketPriority, TicketStatus } from '../shared/types';
@@ -42,6 +42,15 @@ export const TicketDetails: React.FC = () => {
 
   const [commentInput, setCommentInput] = useState('');
   const [isInternalComment, setIsInternalComment] = useState(false);
+
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const autoResize = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 192)}px`;
+  }, []);
+  useEffect(() => { autoResize(); }, [commentInput, autoResize]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -367,7 +376,7 @@ export const TicketDetails: React.FC = () => {
   return (
     <div
       id="ticket-workspace-details"
-      className="flex-1 bg-app p-8 overflow-y-auto h-full font-sans flex flex-col justify-between relative"
+      className="flex-1 bg-app p-4 sm:p-6 lg:p-8 overflow-y-auto h-full font-sans flex flex-col justify-between relative"
     >
       {/* Toast Notification */}
       {toast && (
@@ -1107,15 +1116,18 @@ export const TicketDetails: React.FC = () => {
       {/* Reply input field (bottom layout stick) */}
       <div className="mt-8 border-t border-token pt-6">
         <form onSubmit={handleSubmitComment} className="space-y-3 max-w-4xl">
-          <div className="bg-card border border-token rounded-2xl p-1.5 flex items-center focus-within:border-[var(--accent-primary)] transition-colors">
-            <input
+          <div className="bg-card border border-token rounded-2xl p-1.5 flex items-end focus-within:border-[var(--accent-primary)] transition-colors">
+            <textarea
+              ref={textareaRef}
               id="ticket-comment"
               name="comment"
-              type="text"
               placeholder={isInternalComment ? "Add a private internal technician note..." : "Post a response to the requester..."}
               value={commentInput}
               onChange={(e) => setCommentInput(e.target.value)}
-              className="w-full bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-xs text-primary px-3.5 py-3"
+              onInput={autoResize}
+              rows={1}
+              className="flex-1 bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-xs text-primary px-3.5 py-3 resize-none max-h-48"
+              style={{ height: 'auto', overflowY: 'auto' }}
             />
             <button
               type="submit"

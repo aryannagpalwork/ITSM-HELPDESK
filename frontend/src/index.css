@@ -67,6 +67,7 @@
 html, body, #root {
   background-color: var(--app-bg);
   color: var(--text-primary);
+  overflow-x: hidden;
 }
 
 body {
@@ -149,6 +150,13 @@ body {
 .input-token:focus { border-color: var(--accent-primary); }
 .input-token::placeholder { color: var(--text-tertiary); }
 
+/* Theme selector scrollbar — thin, themed, visible on hover */
+.theme-scroller::-webkit-scrollbar { width: 5px; }
+.theme-scroller::-webkit-scrollbar-track { background: transparent; }
+.theme-scroller::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 4px; }
+.theme-scroller::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
+.theme-scroller { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
+
 /* ─────────────────────────────────────────────────────────────
  * READABILITY FLOOR
  *
@@ -196,9 +204,7 @@ body {
   border-color: #3f3f46;
   font-weight: 700;
 }
-:root[data-theme="light"] .admin-auto-detected-badge,
-:root[data-theme="forest"] .admin-auto-detected-badge,
-:root[data-theme="soft-black"] .admin-auto-detected-badge {
+:root[data-theme="light"] .admin-auto-detected-badge {
   color: #ffffff;
   background-color: #27272a;
   border-color: #3f3f46;

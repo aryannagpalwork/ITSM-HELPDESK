@@ -95,7 +95,7 @@ export const KnowledgeBase: React.FC = () => {
   };
 
   return (
-    <div id="knowledge-base-workspace" className="flex-1 bg-app p-8 overflow-y-auto h-full font-sans">
+    <div id="knowledge-base-workspace" className="flex-1 bg-app p-4 sm:p-6 lg:p-8 overflow-y-auto h-full font-sans">
       <Toaster position="top-right" />
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
         <div>

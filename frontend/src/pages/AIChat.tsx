@@ -27,6 +27,13 @@ export const AIChat: React.FC = () => {
   const { tokens } = useTheme();
   const inputRef = React.useRef<HTMLTextAreaElement | null>(null);
 
+  const autoResize = React.useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 192)}px`;
+  }, []);
+
   const {
     messages,
     input,
@@ -51,6 +58,8 @@ export const AIChat: React.FC = () => {
     handleSatisfactionCreateTicket,
     resetThread,
   } = useChat();
+
+  useEffect(() => { autoResize(); }, [input, autoResize]);
 
     const [isProcessing, setIsProcessing] = useState(false);
     const isProcessingRef = useRef(false);
@@ -272,7 +281,7 @@ export const AIChat: React.FC = () => {
       <div className="flex-1 flex flex-col justify-between h-full" style={{ backgroundColor: 'var(--app-bg)', borderRight: '1px solid var(--border)' }}>
         {/* Top Chat Bar */}
         <div 
-          className="px-6 py-4 backdrop-blur-md flex items-center justify-between sticky top-0 z-10"
+          className="px-4 sm:px-6 py-3 sm:py-4 backdrop-blur-md flex items-center justify-between sticky top-0 z-10"
           style={{ backgroundColor: 'var(--navbar-bg)', borderBottom: '1px solid var(--border)' }}
         >
           <div className="flex items-center space-x-3">
@@ -307,7 +316,7 @@ export const AIChat: React.FC = () => {
         {/* Scrollable Messages */}
         <div 
           ref={contentRef}
-          className="flex-1 overflow-y-auto p-6 space-y-8"
+          className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 sm:space-y-8"
           onScroll={handleConversationScroll}
         >
           {messages.map((msg, idx) => {
@@ -381,7 +390,7 @@ export const AIChat: React.FC = () => {
                   <div className="flex-1 min-w-0">
                     <div 
                       className="text-sm" 
-                      style={{ color: isBot ? 'var(--text-primary)' : 'var(--text-primary)' }}
+                      style={{ color: isBot ? 'var(--text-primary)' : '#ffffff' }}
                     >
                       {/* Message Content */}
                       <div 
@@ -394,9 +403,9 @@ export const AIChat: React.FC = () => {
                           <ReactMarkdown 
                             remarkPlugins={[remarkGfm]}
                             components={{
-                              h1: ({ ...props }) => <h1 className="text-lg font-bold mb-3 mt-4" style={{ color: 'var(--text-primary)' }} {...props} />,
-                              h2: ({ ...props }) => <h2 className="text-base font-semibold mb-2 mt-3" style={{ color: 'var(--text-primary)' }} {...props} />,
-                              h3: ({ ...props }) => <h3 className="text-sm font-semibold mb-1.5 mt-2" style={{ color: 'var(--text-primary)' }} {...props} />,
+                              h1: ({ ...props }) => <h1 className="text-lg font-bold mb-3 mt-4" style={{ color: isBot ? 'var(--text-primary)' : '#ffffff' }} {...props} />,
+                              h2: ({ ...props }) => <h2 className="text-base font-semibold mb-2 mt-3" style={{ color: isBot ? 'var(--text-primary)' : '#ffffff' }} {...props} />,
+                              h3: ({ ...props }) => <h3 className="text-sm font-semibold mb-1.5 mt-2" style={{ color: isBot ? 'var(--text-primary)' : '#ffffff' }} {...props} />,
                               p: ({ ...props }) => <p className="mb-3 last:mb-0" {...props} />,
                               ul: ({ ...props }) => <ul className="list-disc list-outside mb-3 last:mb-0 pl-5 space-y-1" {...props} />,
                               ol: ({ ...props }) => <ol className="list-decimal list-outside mb-3 last:mb-0 pl-5 space-y-1" {...props} />,
@@ -554,7 +563,7 @@ export const AIChat: React.FC = () => {
 
         {/* Input Bar Section */}
         <div 
-          className="p-6"
+          className="p-4 sm:p-6"
           style={{ backgroundColor: 'var(--app-bg)', borderTop: '1px solid var(--border)' }}
         >
           <div className="max-w-3xl mx-auto">
@@ -572,6 +581,7 @@ export const AIChat: React.FC = () => {
                 placeholder="Ask IT support or troubleshoot connection problems..."
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
+                onInput={autoResize}
                 disabled={isProcessing || isTyping}
                 onKeyDown={(e) => {
                   if (!isProcessing && !isTyping && e.key === 'Enter' && !e.shiftKey) {
@@ -580,7 +590,7 @@ export const AIChat: React.FC = () => {
                   }
                 }}
                 className="flex-1 bg-transparent border-none text-sm outline-none resize-none max-h-48"
-                style={{ color: 'var(--text-primary)' }}
+                style={{ color: 'var(--text-primary)', height: 'auto', overflowY: 'auto' }}
                 rows={1}
               />
               <button 
@@ -606,7 +616,7 @@ export const AIChat: React.FC = () => {
 
       {/* Right Column: AI suggested ticket ticket proposal */}
       <div 
-        className="w-80 p-6 flex flex-col justify-between shrink-0 h-full"
+        className="hidden lg:flex w-80 p-6 flex-col justify-between shrink-0 h-full"
         style={{ backgroundColor: 'var(--app-bg)' }}
       >
         <div className="space-y-6">
