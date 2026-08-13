@@ -541,9 +541,9 @@ export const AgentDashboard: React.FC = () => {
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           <KpiCard tokens={tokens} label="Assigned" value={m.assignedTickets} icon={<Inbox className="w-3 h-3" style={{ color: tokens.accentPrimary }} />} color="" subtitle={metricsAvailable ? 'Open assigned ticket queue' : 'Loading...'} isActive={cardFilter?.label === 'Assigned'} onClick={() => navigate('/agent/tickets')} onOpen={() => navigate('/agent/tickets')} openLabel="Open full ticket queue" />
           <KpiCard tokens={tokens} label="Resolved Today" value={m.resolvedToday} icon={<CheckCircle2 className="w-3 h-3" style={{ color: tokens.statusInfo }} />} color="" subtitle={metricsAvailable ? 'Open resolved tickets' : 'Loading...'} isActive={cardFilter?.label === 'Resolved Today'} onClick={() => navigate('/agent/tickets?status=resolved')} onOpen={() => navigate('/agent/tickets?status=resolved')} openLabel="Open resolved tickets" />
-          <KpiCard tokens={tokens} label="Agent MTTR" value={richKpisAvailable && m.agentMttrHours !== null ? `${m.agentMttrHours}h` : '—'} icon={<Timer className="w-3 h-3" style={{ color: tokens.statusInfo }} />} color="" subtitle="Average resolution time for agent-resolved tickets" accent={richKpisAvailable} isActive={cardFilter?.label === 'Agent MTTR'} onClick={() => navigate('/agent/tickets?status=resolved')} onOpen={() => navigate('/agent/tickets?status=resolved')} openLabel="Open resolved tickets" />
-          <KpiCard tokens={tokens} label="AI MTTR" value={richKpisAvailable && m.aiMttrHours !== null ? `${m.aiMttrHours}h` : '—'} icon={<Sparkles className="w-3 h-3" style={{ color: tokens.statusInfo }} />} color="" subtitle="Average resolution time for AI-resolved tickets" accent={richKpisAvailable} isActive={cardFilter?.label === 'AI MTTR'} onClick={() => navigate('/agent/tickets?status=resolved')} onOpen={() => navigate('/agent/tickets?status=resolved')} openLabel="Open resolved tickets" />
-          <KpiCard tokens={tokens} label="Agent First Contact Resolution" value={richKpisAvailable && m.agentFcrRate !== null ? `${m.agentFcrRate}%` : '—'} icon={<UserCircle2 className="w-3 h-3" style={{ color: tokens.accentPrimary }} />} color="" subtitle="First-contact agent resolutions" accent={richKpisAvailable} isActive={cardFilter?.label === 'Agent First Contact Resolution'} onClick={() => navigate('/agent/tickets?status=resolved')} onOpen={() => navigate('/agent/tickets?status=resolved')} openLabel="Open resolved tickets" />
+          <KpiCard tokens={tokens} label="Agent MTTR" value={richKpisAvailable && m.agentMttrHours !== null ? `${m.agentMttrHours}h` : '—'} icon={<Timer className="w-3 h-3" style={{ color: tokens.statusInfo }} />} color="" subtitle="Average resolution time for agent-resolved tickets" accent={richKpisAvailable} isActive={cardFilter?.label === 'Agent MTTR'} onClick={() => navigate('/agent/tickets?status=resolved&resolution_source=agent')} onOpen={() => navigate('/agent/tickets?status=resolved&resolution_source=agent')} openLabel="Open resolved tickets" />
+          <KpiCard tokens={tokens} label="AI MTTR" value={richKpisAvailable && m.aiMttrHours !== null ? `${m.aiMttrHours}h` : '—'} icon={<Sparkles className="w-3 h-3" style={{ color: tokens.statusInfo }} />} color="" subtitle="Average resolution time for AI-resolved tickets" accent={richKpisAvailable} isActive={cardFilter?.label === 'AI MTTR'} onClick={() => navigate('/agent/tickets?status=resolved&resolution_source=ai')} onOpen={() => navigate('/agent/tickets?status=resolved&resolution_source=ai')} openLabel="Open resolved tickets" />
+          <KpiCard tokens={tokens} label="Agent First Contact Resolution" value={richKpisAvailable && m.agentFcrRate !== null ? `${m.agentFcrRate}%` : '—'} icon={<UserCircle2 className="w-3 h-3" style={{ color: tokens.accentPrimary }} />} color="" subtitle="First-contact agent resolutions" accent={richKpisAvailable} isActive={cardFilter?.label === 'Agent First Contact Resolution'} onClick={() => navigate('/agent/tickets?status=resolved&resolution_source=agent')} onOpen={() => navigate('/agent/tickets?status=resolved&resolution_source=agent')} openLabel="Open resolved tickets" />
         </div>
       </div>
 
@@ -768,6 +768,19 @@ export const AgentDashboard: React.FC = () => {
             </select>
           </div>
         </div>
+
+        {(search || statusFilter !== 'all' || priorityFilter !== 'all' || assignmentFilter !== 'all') && (
+          <div className="flex items-center gap-2 mb-4">
+            <button
+              type="button"
+              onClick={() => { setSearch(''); setStatusFilter('all'); setPriorityFilter('all'); setAssignmentFilter('all'); }}
+              className="text-[10px] font-mono px-2.5 py-1 rounded-lg border transition-colors cursor-pointer"
+              style={{ borderColor: tokens.border, color: tokens.textSecondary, backgroundColor: tokens.cardBgSolid }}
+            >
+              Clear Filters
+            </button>
+          </div>
+        )}
 
         {filteredTickets.length === 0 ? (
           <div 
@@ -1213,3 +1226,5 @@ export const AgentDashboard: React.FC = () => {
 };
 
 export default AgentDashboard;
+
+

@@ -382,6 +382,7 @@ export interface TicketQuery {
   priority?: string;
   category?: string;
   assignment?: string;
+  resolutionSource?: 'agent' | 'ai';
   sortBy?: string;
   sortOrder?: 'asc' | 'desc';
 }
@@ -871,6 +872,7 @@ export const listTickets = async (query: TicketQuery = {}) => {
   if (query.priority && query.priority !== 'all') params.set('priority', query.priority);
   if (query.category) params.set('category', query.category);
   if (query.assignment) params.set('assignment', query.assignment);
+  if (query.resolutionSource) params.set('resolution_source', query.resolutionSource);
 
   const response = await apiFetch(`${API_BASE_URL}/tickets?${params.toString()}`);
   if (!response.ok) {

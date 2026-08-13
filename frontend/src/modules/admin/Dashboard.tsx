@@ -275,8 +275,8 @@ export const AdminDashboard: React.FC = () => {
             sublabel={richKpisAvailable ? 'Average resolution time for agent-resolved tickets' : 'Calculating…'}
             loading={kpiLoading}
             isActive={filterActive('Agent MTTR')}
-            onClick={() => goToTickets('?status=resolved')}
-            onOpen={() => goToTickets('?status=resolved')}
+            onClick={() => goToTickets('?status=resolved&resolution_source=agent')}
+            onOpen={() => goToTickets('?status=resolved&resolution_source=agent')}
           />
           <KpiCard
             label="AI MTTR"
@@ -286,8 +286,8 @@ export const AdminDashboard: React.FC = () => {
             sublabel={richKpisAvailable ? 'Average resolution time for AI-resolved tickets' : 'Pending data'}
             loading={kpiLoading}
             isActive={filterActive('AI MTTR')}
-            onClick={() => goToTickets('?status=resolved')}
-            onOpen={() => goToTickets('?status=resolved')}
+            onClick={() => goToTickets('?status=resolved&resolution_source=ai')}
+            onOpen={() => goToTickets('?status=resolved&resolution_source=ai')}
           />
           <KpiCard
             label="Agent First Contact Resolution"
@@ -297,8 +297,8 @@ export const AdminDashboard: React.FC = () => {
             sublabel={richKpisAvailable ? 'First-contact agent resolutions' : 'Pending data'}
             loading={kpiLoading}
             isActive={filterActive('Agent First Contact Resolution')}
-            onClick={() => goToTickets('?status=resolved')}
-            onOpen={() => goToTickets('?status=resolved')}
+            onClick={() => goToTickets('?status=resolved&resolution_source=agent')}
+            onOpen={() => goToTickets('?status=resolved&resolution_source=agent')}
           />
           <KpiCard
             label="Agents On Leave Today"

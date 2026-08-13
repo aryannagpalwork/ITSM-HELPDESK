@@ -40,6 +40,7 @@
  * ───────────────────────────────────────────────────────────── */
 
 :root {
+  color-scheme: dark;
   --app-bg:         #09090b;
   --surface-bg:     #0a0a0a;
   --card-bg:        rgba(24, 24, 27, 0.40);
@@ -156,6 +157,22 @@ body {
 .theme-scroller::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 4px; }
 .theme-scroller::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
 .theme-scroller { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
+
+/* Global select/option dark theme support — ensures native dropdowns are readable */
+select {
+  color-scheme: dark;
+}
+:root[data-theme="light"] select {
+  color-scheme: light;
+}
+select option {
+  background-color: var(--card-bg-solid);
+  color: var(--text-primary);
+}
+:root[data-theme="light"] select option {
+  background-color: #ffffff;
+  color: #0f172a;
+}
 
 /* ─────────────────────────────────────────────────────────────
  * READABILITY FLOOR

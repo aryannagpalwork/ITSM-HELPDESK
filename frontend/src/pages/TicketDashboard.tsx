@@ -35,6 +35,7 @@ export const TicketDashboard: React.FC = () => {
   const [search, setSearch] = useState(() => searchParams.get('search') ?? '');
   const [statusFilter, setStatusFilter] = useState<string>(() => searchParams.get('status') ?? 'all');
   const [priorityFilter, setPriorityFilter] = useState<string>(() => searchParams.get('priority') ?? 'all');
+  const [resolutionSourceFilter, setResolutionSourceFilter] = useState<string>(() => searchParams.get('resolution_source') ?? 'all');
   const [slaFilter] = useState<string>(() => searchParams.get('sla') ?? 'all');
   const [sortBy, setSortBy] = useState<string>('newest');
   const ticketView = searchParams.get('view') ?? 'all';
@@ -61,6 +62,7 @@ export const TicketDashboard: React.FC = () => {
     setSearch(searchParams.get('search') ?? '');
     setStatusFilter(searchParams.get('status') ?? 'all');
     setPriorityFilter(searchParams.get('priority') ?? 'all');
+    setResolutionSourceFilter(searchParams.get('resolution_source') ?? 'all');
   }, [searchParams]);
 
   // New Request Form State (within dashboard)
@@ -77,9 +79,10 @@ export const TicketDashboard: React.FC = () => {
       // records are not removed by the API status filter.
       status: ticketView === 'resolved' ? 'all' : statusFilter,
       priority: priorityFilter,
+      resolutionSource: resolutionSourceFilter === 'all' ? undefined : (resolutionSourceFilter as 'agent' | 'ai'),
       sortBy,
     });
-  }, [search, statusFilter, priorityFilter, sortBy, ticketView]);
+  }, [search, statusFilter, priorityFilter, resolutionSourceFilter, sortBy, ticketView]);
 
   // Filter logic
   const filteredTickets = tickets.filter(ticket => {
@@ -102,7 +105,6 @@ export const TicketDashboard: React.FC = () => {
 
     // Priority filter match
     const matchesPriority = priorityFilter === 'all' || ticket.priority === priorityFilter;
-
     const ticketText = `${ticket.title} ${ticket.description} ${ticket.category || ''}`.toLowerCase();
     const awaitingResponse = ticket.status === 'waiting_for_user_response'
       || ticket.awaitingCustomerResponse === true
@@ -293,6 +295,19 @@ export const TicketDashboard: React.FC = () => {
           </div>
 
         </div>
+
+        {(search || statusFilter !== 'all' || priorityFilter !== 'all') && (
+          <div className="flex items-center gap-2 mt-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+            <button
+              type="button"
+              onClick={() => { setSearch(''); setStatusFilter('all'); setPriorityFilter('all'); }}
+              className="text-[10px] font-mono px-2.5 py-1 rounded-lg border transition-colors cursor-pointer"
+              style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)', backgroundColor: 'var(--card-bg)' }}
+            >
+              Clear Filters
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Main Grid List of Tickets */}

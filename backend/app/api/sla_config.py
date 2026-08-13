@@ -1,11 +1,14 @@
 """Admin-only SLA configuration endpoints."""
 
+import logging
 from fastapi import APIRouter, Depends
 
 from app.api.deps import DatabaseSession
 from app.auth.dependencies import get_current_user, require_roles
 from app.schemas.sla_config import SLAConfigRead, SLAConfigUpdate, PrioritySLAConfig
-from app.services.sla import apply_sla_config
+from app.services.sla import apply_sla_config, recalculate_sla_for_all_tickets
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sla-config", tags=["SLA Configuration"])
 
@@ -57,16 +60,35 @@ async def update_sla_config(
 ) -> SLAConfigRead:
     raw = await _load_config(db)
 
+    # Track which priorities were changed
+    changed_priorities = []
+    
     for key in ("critical", "high", "medium", "low"):
         patch = getattr(payload, key, None)
         if patch is not None:
             raw[key] = patch.model_dump()
+            changed_priorities.append(key.title())
 
     if payload.near_breach_percent is not None:
         raw["near_breach_percent"] = payload.near_breach_percent
 
     await _save_config(db, raw)
     apply_sla_config(raw)
+    
+    # Recalculate SLA status for all affected tickets
+    try:
+        if changed_priorities:
+            # Only recalculate tickets of changed priorities
+            updated_count = await recalculate_sla_for_all_tickets(db, changed_priorities)
+        else:
+            # If only near_breach_percent changed, recalculate all tickets
+            updated_count = await recalculate_sla_for_all_tickets(db)
+        
+        logger.info(f"SLA configuration updated. Recalculated SLA for {updated_count} tickets.")
+    except Exception as exc:
+        logger.error(f"Failed to recalculate SLA for tickets: {exc}")
+        # Don't fail the API call if recalculation fails; config was saved successfully
+    
     return SLAConfigRead(
         critical=PrioritySLAConfig(**raw["critical"]),
         high=PrioritySLAConfig(**raw["high"]),

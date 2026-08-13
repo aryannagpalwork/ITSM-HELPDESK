@@ -695,7 +695,7 @@ export const AIChat: React.FC = () => {
                 onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.9'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
               >
-                <span>{suggestedTicket.resolvedByAI ? 'Resolved by AI' : suggestedTicket.knowledgeBaseFallback ? 'Create Ticket / File Incident' : 'File Support Incident'}</span>
+                <span>{suggestedTicket.resolvedByAI ? 'View Resolution' : suggestedTicket.knowledgeBaseFallback ? 'Create Ticket / File Incident' : 'File Support Incident'}</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
