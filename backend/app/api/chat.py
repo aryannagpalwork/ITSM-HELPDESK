@@ -43,7 +43,7 @@ from bson import ObjectId
 logger = logging.getLogger(__name__)
 
 UNKNOWN_IT_QUERY_RESPONSE = (
-    "Sorry, this time we don't have enough knowledge to answer this. Our IT team is always here to help you. Please connect with them by pressing the File/Ticket button in the sidebar."
+    "I couldn't resolve this issue using the available troubleshooting information. I'll create an IT support incident with the details from our conversation so the support team can investigate it."
 )
 
 # This classifier is deliberately conservative: it is only used to select the
@@ -59,8 +59,8 @@ IT_QUERY_TERMS = {
 }
 
 GUIDED_NO_SOLUTION_RESPONSE = (
-    "I couldn't fully resolve your issue using the available knowledge base.\n\n"
-    "Please click 'File Ticket' in the sidebar to raise this issue to the IT support team."
+    "I couldn't resolve this issue using the available troubleshooting information. "
+    "I'll create an IT support incident with the details from our conversation so the support team can investigate it."
 )
 
 GREETING_PHRASES = {
@@ -106,6 +106,30 @@ def _greeting_prompt(query: str) -> BuiltPrompt:
         context_used=context,
         metadata={"query_type": "GREETING"},
     )
+
+
+def has_sufficient_retrieval_context(retrieved_context: RetrievedContext, query: str | None = None) -> bool:
+    """Return True only when retrieved KB evidence is strong enough to ground an answer."""
+    if not retrieved_context or not retrieved_context.search_results:
+        return False
+
+    query_terms = set(re.findall(r"[a-z0-9]+", (query or "").lower())) if query else set()
+
+    for result in retrieved_context.search_results:
+        metadata = result.metadata or {}
+        score = float(metadata.get("relevance_score", metadata.get("hybrid_score", metadata.get("similarity_score", 0.0)) or 0.0))
+        valid = bool(metadata.get("relevance_valid", score >= 0.35))
+        if not valid:
+            continue
+        if score < 0.35:
+            continue
+
+        chunk_text = (result.chunk.text or result.chunk.chunk_text or "").lower()
+        if query_terms and not any(term in chunk_text for term in query_terms):
+            continue
+        return True
+
+    return False
 
 
 DEFAULT_TROUBLESHOOTING_FAILURE_THRESHOLD = int(os.getenv("TROUBLESHOOTING_FAILURE_THRESHOLD", "3"))
@@ -1258,12 +1282,13 @@ async def chat(
             guided_phase = "TROUBLESHOOTING"
             guided_state = "TROUBLESHOOTING"
 
+    retrieval_confident = has_sufficient_retrieval_context(retrieved_context, payload.query)
     if guided_question:
         answer = guided_question
         guided_actions = []
         kb_hit = True
         confidence = confidence or 1.0
-    elif kb_hit:
+    elif kb_hit and retrieval_confident:
         prompt_builder = PromptBuilderFactory.create("rag")
         built_prompt = prompt_builder.build(
             query=payload.query,
@@ -1291,6 +1316,7 @@ async def chat(
         guided_state = "NO_SOLUTION"
         guided_phase = "KB_EXHAUSTED"
         guided_actions = []
+        kb_hit = False
 
     if kb_hit and not guided_question and "Did this fix your issue?" not in answer:
         answer = f"{answer.rstrip()}\n\nDid this fix your issue?"
@@ -1298,6 +1324,12 @@ async def chat(
             "Chat response source=No KB Match query_type=%s kb_hit=false threshold=%s documents=0",
             response_query_type,
             retrieval_threshold,
+        )
+
+    if not kb_hit and not guided_question and it_related_query:
+        logger.info(
+            "Grounded response blocked: insufficient retrieval confidence for query=%r; using existing safe fallback.",
+            payload.query,
         )
 
     # Record the assistant response and set likely_resolution_provided when:
