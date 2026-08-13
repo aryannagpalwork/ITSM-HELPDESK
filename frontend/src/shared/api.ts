@@ -1437,6 +1437,7 @@ const mapAlertItem = (item: any): SystemAlert => ({
   relatedTicketIds: item.related_ticket_ids,
   windowStart: item.window_start,
   windowEnd: item.window_end,
+  targetRoles: item.target_roles,
 });
 
 const mapNotificationItem = (item: any): UserNotification => ({
@@ -1469,7 +1470,7 @@ export const getAllAlerts = async (): Promise<SystemAlert[]> => {
   return data.map(mapAlertItem);
 };
 
-export const createAlert = async (payload: { title: string; message: string; category?: string }): Promise<SystemAlert> => {
+export const createAlert = async (payload: { title: string; message: string; category?: string; target_roles?: string[] }): Promise<SystemAlert> => {
   const response = await apiFetch(`${API_BASE_URL}/alerts`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

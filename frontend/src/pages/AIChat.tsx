@@ -170,6 +170,10 @@ export const AIChat: React.FC = () => {
     return text.length > 1200;
   };
 
+  const isConversationEnded = () => {
+    return conversationStatus === 'RESOLVED' || conversationStatus === 'ESCALATED';
+  };
+
   const renderSatisfactionCard = () => {
     if (!activeSatisfactionCard?.show || guidedActions.length > 0 || guidedState === 'NO_SOLUTION') return null;
     const isPositive = activeSatisfactionCard.reason === 'POSITIVE_TREND';
@@ -308,8 +312,8 @@ export const AIChat: React.FC = () => {
             onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--hover)'; e.currentTarget.style.color = 'var(--text-primary)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'var(--card-bg-solid)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
           >
-            <RefreshCw className="w-3 h-3" />
-            <span>Reset Thread</span>
+            <PlusCircle className="w-3 h-3" />
+            <span>New Chat</span>
           </button>
         </div>
 
@@ -567,10 +571,18 @@ export const AIChat: React.FC = () => {
           style={{ backgroundColor: 'var(--app-bg)', borderTop: '1px solid var(--border)' }}
         >
           <div className="max-w-3xl mx-auto">
+            {isConversationEnded() && (
+              <div 
+                className="p-3 rounded-xl mb-4 text-center text-[11px] font-semibold"
+                style={{ backgroundColor: tokens.statusSuccessBg, color: tokens.statusSuccess, border: `1px solid ${tokens.statusSuccess}26` }}
+              >
+                ✓ This conversation has ended. To start a new conversation, click the "New Chat" button above.
+              </div>
+            )}
             <div 
               className="relative flex items-end rounded-2xl transition-all p-3"
-              style={{ backgroundColor: 'var(--input-bg)', border: '1px solid var(--border)' }}
-              onFocus={(e) => { e.currentTarget.style.borderColor = tokens.accentPrimary; }}
+              style={{ backgroundColor: isConversationEnded() ? 'var(--card-bg-solid)' : 'var(--input-bg)', border: `1px solid ${isConversationEnded() ? 'var(--border)' : 'var(--border)'}`, opacity: isConversationEnded() ? 0.6 : 1 }}
+              onFocus={(e) => { if (!isConversationEnded()) e.currentTarget.style.borderColor = tokens.accentPrimary; }}
               onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; }}
             >
               <MessageSquare className="w-5 h-5 mr-3 mb-0.5" style={{ color: 'var(--text-tertiary)' }} />
@@ -582,9 +594,9 @@ export const AIChat: React.FC = () => {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onInput={autoResize}
-                disabled={isProcessing || isTyping}
+                disabled={isProcessing || isTyping || isConversationEnded()}
                 onKeyDown={(e) => {
-                  if (!isProcessing && !isTyping && e.key === 'Enter' && !e.shiftKey) {
+                  if (!isProcessing && !isTyping && !isConversationEnded() && e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
                     handleSendPromptWrapper(input);
                   }
@@ -595,7 +607,7 @@ export const AIChat: React.FC = () => {
               />
               <button 
                 onClick={() => handleSendPromptWrapper(input)}
-                disabled={isProcessing || isTyping}
+                disabled={isProcessing || isTyping || isConversationEnded()}
                 className="p-2 rounded-xl transition-all shrink-0 cursor-pointer ml-2"
                 style={{ backgroundColor: tokens.accentPrimary, color: 'var(--accent-primary-contrast)' }}
                 onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.9'; }}

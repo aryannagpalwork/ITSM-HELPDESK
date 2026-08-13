@@ -76,6 +76,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [collapsedMessages, setCollapsedMessages] = useState<Record<string, boolean>>({});
   const [activeSatisfactionCard, setActiveSatisfactionCard] = useState<SatisfactionCard | null>(null);
+  const [pendingSatisfactionCard, setPendingSatisfactionCard] = useState<SatisfactionCard | null>(null);
   const [conversationStatus, setConversationStatus] = useState<ConversationStatus>('ACTIVE');
   const [guidedActions, setGuidedActions] = useState<string[]>([]);
   const [guidedState, setGuidedState] = useState<string | null>(null);
@@ -96,6 +97,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try { sessionStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) { /* ignore */ }
       setCollapsedMessages({});
       setActiveSatisfactionCard(null);
+      setPendingSatisfactionCard(null);
       setConversationStatus('ACTIVE');
       setGuidedActions([]);
       setGuidedState(null);
@@ -116,8 +118,30 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const resp = await getChatHistory(storedId);
         const msgs = (resp.messages || []).map(m => ({ id: String(m.id || `${m.sender}_${Date.now()}`), sender: m.sender as 'user' | 'assistant' | 'system', text: m.text, timestamp: m.timestamp } as ChatMessage));
-        // If there are no messages, keep welcome message.
-        if (msgs.length > 0) setMessages(msgs as ChatMessage[]);
+        
+        // Reconstruct ticket success message if ticket was created and conversation is ESCALATED
+        // but the success message is not already in the restored messages
+        const conversation = resp.conversation as any;
+        if (resp.conversation_status === 'ESCALATED' && conversation?.ticket_id && conversation?.ticket_number) {
+          const hasTicketSuccessMsg = msgs.some(m => 
+            m.sender === 'system' && m.text.includes('IT Incident Ticket Created Successfully')
+          );
+          if (!hasTicketSuccessMsg) {
+            const successMsg: ChatMessage = {
+              id: `sys_reconstructed_${storedId?.slice(0, 8)}_ticket`,
+              sender: 'system',
+              text: `✅ **IT Incident Ticket Created Successfully!**\n\n**Ticket Reference:** ${conversation.ticket_number || conversation.ticket_id}\n**Priority:** ${(conversation.priority || 'MEDIUM').toUpperCase()}\n**Status:** OPEN\n\nYou can view and track this ticket in the Ticket Queue.`,
+              timestamp: new Date().toISOString(),
+            };
+            msgs.push(successMsg);
+          }
+        }
+        
+        // If there are no messages, keep welcome message. If there ARE
+        // restored messages, prepend the welcome message back in — it's a
+        // frontend-only greeting that's never saved to chat_history on the
+        // backend, so a plain restore would otherwise silently drop it.
+        if (msgs.length > 0) setMessages([WELCOME_MESSAGE, ...msgs] as ChatMessage[]);
         setSessionId(resp.session_id || storedId);
         if (resp.conversation_status) setConversationStatus(resp.conversation_status as ConversationStatus || 'ACTIVE');
 
@@ -209,6 +233,19 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     typeChar();
   };
 
+  // When typing finishes, show any pending satisfaction card
+  useEffect(() => {
+    if (!isTyping && pendingSatisfactionCard?.show && !activeSatisfactionCard) {
+      setActiveSatisfactionCard(pendingSatisfactionCard);
+      if (pendingSatisfactionCard.reason === 'POSITIVE_TREND') {
+        setConversationStatus('LIKELY_RESOLVED');
+      } else if (pendingSatisfactionCard.reason === 'NEGATIVE_STALL') {
+        setConversationStatus('WAITING_FOR_USER');
+      }
+      setPendingSatisfactionCard(null);
+    }
+  }, [isTyping, pendingSatisfactionCard, activeSatisfactionCard]);
+
   const handleSendPrompt = async (
     textToSend: string,
     preserveHistory: boolean = true,
@@ -255,14 +292,11 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (response.guided_state === 'RESOLVED') {
         setConversationStatus('RESOLVED');
         setActiveSatisfactionCard(null);
+        setPendingSatisfactionCard(null);
         setSuggestedTicket(prev => prev ? { ...prev, resolvedByAI: true } : prev);
-      } else if (!response.guided_state && response.satisfaction_card?.show && !activeSatisfactionCard) {
-        setActiveSatisfactionCard(response.satisfaction_card);
-        if (response.satisfaction_card.reason === 'POSITIVE_TREND') {
-          setConversationStatus('LIKELY_RESOLVED');
-        } else if (response.satisfaction_card.reason === 'NEGATIVE_STALL') {
-          setConversationStatus('WAITING_FOR_USER');
-        }
+      } else if (!response.guided_state && response.satisfaction_card?.show && !activeSatisfactionCard && !pendingSatisfactionCard) {
+        // Store in pending state; it will be shown after typing completes
+        setPendingSatisfactionCard(response.satisfaction_card);
       }
 
       simulateTyping(response.answer, `bot_${Date.now()}`);
@@ -368,6 +402,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
 
       setMessages(prev => [...prev, confirmationMsg]);
+      // Mark conversation as escalated/ended after successful ticket creation
+      setConversationStatus('ESCALATED');
       setIsTyping(false);
       setIsEscalating(false);
     } catch (error) {
@@ -463,6 +499,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSessionId(null);
     setCollapsedMessages({});
     setActiveSatisfactionCard(null);
+    setPendingSatisfactionCard(null);
     setConversationStatus('ACTIVE');
     setGuidedActions([]);
     setGuidedState(null);

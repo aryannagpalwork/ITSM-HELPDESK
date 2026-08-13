@@ -105,6 +105,7 @@ export interface SystemAlert {
   relatedTicketIds?: string[] | null;
   windowStart?: string | null;
   windowEnd?: string | null;
+  targetRoles?: string[] | null;
 }
 
 export interface UserNotification {

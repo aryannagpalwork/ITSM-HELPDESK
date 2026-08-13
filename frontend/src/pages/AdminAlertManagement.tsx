@@ -25,6 +25,7 @@ export const AdminAlertManagement: React.FC = () => {
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('');
   const [message, setMessage] = useState('');
+  const [targetRoles, setTargetRoles] = useState<string[]>(['employee', 'agent']);
   const [creating, setCreating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
@@ -61,6 +62,10 @@ export const AdminAlertManagement: React.FC = () => {
       setFormError('Title and message are required.');
       return;
     }
+    if (targetRoles.length === 0) {
+      setFormError('Select at least one recipient (Employees or Agents).');
+      return;
+    }
     setCreating(true);
     setFormError(null);
     setFormSuccess(null);
@@ -69,15 +74,13 @@ export const AdminAlertManagement: React.FC = () => {
         title: title.trim(),
         message: message.trim(),
         category: category.trim() || undefined,
+        target_roles: targetRoles,
       });
       setTitle('');
       setCategory('');
       setMessage('');
-      setFormSuccess(
-        created.recommendation
-          ? 'Alert created with KB recommendation automatically attached!'
-          : 'Alert created successfully!'
-      );
+      setTargetRoles(['employee', 'agent']);
+      setFormSuccess('Alert created successfully!');
       fetchAlerts();
       setTimeout(() => setFormSuccess(null), 4000);
     } catch (err: any) {
@@ -186,7 +189,7 @@ export const AdminAlertManagement: React.FC = () => {
             </div>
             <div>
               <h3 className="text-sm font-bold text-primary">Broadcast New Alert</h3>
-              <p className="text-[11px] text-secondary">Target system incidents with KB recommendations</p>
+              <p className="text-[11px] text-secondary">Broadcast system incident alerts to selected recipients</p>
             </div>
           </div>
 
@@ -227,7 +230,7 @@ export const AdminAlertManagement: React.FC = () => {
                 className="w-full px-3 py-2 rounded-xl bg-app border border-border text-xs text-primary placeholder-tertiary focus:outline-none focus:border-accent"
               />
               <span className="text-[10px] text-tertiary block mt-1">
-                Category is used for KB recommendation lookup
+                Optional category for organizing the alert
               </span>
             </div>
 
@@ -243,6 +246,47 @@ export const AdminAlertManagement: React.FC = () => {
                 className="w-full px-3 py-2 rounded-xl bg-app border border-border text-xs text-primary placeholder-tertiary focus:outline-none focus:border-accent resize-none"
                 required
               />
+            </div>
+
+            <div className="bg-zinc-900 rounded-xl p-3 border border-border space-y-2">
+              <label className="block text-xs font-semibold text-secondary">
+                Notify Recipients <span className="text-rose-400">*</span>
+              </label>
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={targetRoles.includes('employee')}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setTargetRoles([...targetRoles, 'employee']);
+                      } else {
+                        setTargetRoles(targetRoles.filter(r => r !== 'employee'));
+                      }
+                    }}
+                    className="w-4 h-4 rounded border-border bg-app text-blue-500 cursor-pointer"
+                  />
+                  <span className="text-xs text-secondary">Employees</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={targetRoles.includes('agent')}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setTargetRoles([...targetRoles, 'agent']);
+                      } else {
+                        setTargetRoles(targetRoles.filter(r => r !== 'agent'));
+                      }
+                    }}
+                    className="w-4 h-4 rounded border-border bg-app text-blue-500 cursor-pointer"
+                  />
+                  <span className="text-xs text-secondary">Agents</span>
+                </label>
+              </div>
+              <span className="text-[10px] text-tertiary block">
+                Select who receives notifications about this alert
+              </span>
             </div>
 
             <button
@@ -347,7 +391,7 @@ export const AdminAlertManagement: React.FC = () => {
 
                     <p className="text-xs text-secondary leading-relaxed">{item.message}</p>
 
-                    {item.recommendation && (
+                    {item.recommendation && item.source === 'auto_detected' && (
                       <div className="mt-2.5 p-3 rounded-xl bg-amber-500/5 border border-amber-500/20 text-amber-200 text-xs">
                         <div className="flex items-center gap-1 font-bold text-amber-400 text-[10px] uppercase tracking-wider mb-1">
                           <Sparkles className="w-3.5 h-3.5" />
