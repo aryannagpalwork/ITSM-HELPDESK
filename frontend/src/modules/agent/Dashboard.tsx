@@ -31,7 +31,8 @@ import {
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts';
 import { TicketPriority, TicketStatus, AgentMetrics, TimelineRange, TicketLifecycleTimeline } from '../../shared/types';
-import { getAgentTicketTimeline, listAgents, getTicketAuditLogs } from '../../shared/api';
+import { getAgentTicketTimeline, listAgents, getTicketAuditLogs, checkDuplicateTicket } from '../../shared/api';
+import { DuplicateWarningModal, DuplicateWarning } from '../../shared/DuplicateWarningModal';
 import { RangeToggle } from '../admin/components/RangeToggle';
 import TicketLifecycleDetailChart from '../admin/components/charts/TicketLifecycleDetailChart';
 import { UpcomingActionsStepper } from '../../components/UpcomingActionsStepper';
@@ -164,6 +165,10 @@ export const AgentDashboard: React.FC = () => {
   const [newTitle, setNewTitle] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [newPriority, setNewPriority] = useState<TicketPriority>('medium');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const [duplicateWarning, setDuplicateWarning] = useState<DuplicateWarning | null>(null);
+  const [ticketError, setTicketError] = useState<string | null>(null);
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -346,20 +351,81 @@ export const AgentDashboard: React.FC = () => {
 
   const handleCreateTicket = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTitle.trim() || !newDesc.trim()) return;
+    if (!newTitle.trim() || !newDesc.trim() || submittingRef.current) return;
 
-    await createTicket({
-      title: newTitle,
-      description: newDesc,
-      priority: newPriority,
-      aiSummary: `AI Summary: Support incident created by agent. Title: "${newTitle}".`,
-      suggestedResolution: `Recommended Resolution Steps: 1. Review standard procedures. 2. Verify active directories. 3. Coordinate diagnostic tasks.`
-    });
+    const trimmedTitle = newTitle.trim();
+    const trimmedDescription = newDesc.trim();
+    submittingRef.current = true;
+    setIsSubmitting(true);
+    setTicketError(null);
 
-    setNewTitle('');
-    setNewDesc('');
-    setNewPriority('medium');
-    setIsCreateOpen(false);
+    try {
+      const possibleDuplicate = await checkDuplicateTicket({
+        title: trimmedTitle,
+        description: trimmedDescription,
+      });
+
+      if (possibleDuplicate.status === 'exact' || possibleDuplicate.status === 'possible') {
+        setDuplicateWarning(possibleDuplicate);
+        submittingRef.current = false;
+        setIsSubmitting(false);
+        return;
+      }
+
+      await createTicket({
+        title: trimmedTitle,
+        description: trimmedDescription,
+        priority: newPriority,
+        aiSummary: `AI Summary: Support incident created by agent. Title: "${trimmedTitle}".`,
+        suggestedResolution: `Recommended Resolution Steps: 1. Review standard procedures. 2. Verify active directories. 3. Coordinate diagnostic tasks.`
+      });
+
+      setNewTitle('');
+      setNewDesc('');
+      setNewPriority('medium');
+      setIsCreateOpen(false);
+    } catch (error) {
+      console.error('Ticket creation failed:', error);
+      setTicketError('Unable to verify duplicates. Please try again or contact support.');
+    } finally {
+      submittingRef.current = false;
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCreateAnyway = async () => {
+    if (submittingRef.current) return;
+    const trimmedTitle = newTitle.trim();
+    const trimmedDescription = newDesc.trim();
+    submittingRef.current = true;
+    setDuplicateWarning(null);
+    setIsSubmitting(true);
+    setTicketError(null);
+
+    try {
+      await createTicket({
+        title: trimmedTitle,
+        description: trimmedDescription,
+        priority: newPriority,
+        aiSummary: `AI Summary: Support incident created by agent. Title: "${trimmedTitle}".`,
+        suggestedResolution: `Recommended Resolution Steps: 1. Review standard procedures. 2. Verify active directories. 3. Coordinate diagnostic tasks.`
+      }, undefined, duplicateWarning ? {
+        duplicateOfTicketId: duplicateWarning.ticket?.id,
+        duplicateStatus: duplicateWarning.status,
+        duplicateSimilarityScore: duplicateWarning.similarity_score,
+      } : undefined);
+
+      setNewTitle('');
+      setNewDesc('');
+      setNewPriority('medium');
+      setIsCreateOpen(false);
+    } catch (error) {
+      console.error('Ticket creation failed:', error);
+      setTicketError('Failed to create ticket. Please try again.');
+    } finally {
+      submittingRef.current = false;
+      setIsSubmitting(false);
+    }
   };
 
   const openReassignModal = async (ticketId: string, ticketNumber: string, ticketTitle: string, e?: React.MouseEvent) => {
@@ -494,7 +560,7 @@ export const AgentDashboard: React.FC = () => {
             <span>AI Copilot</span>
           </button>
           <button 
-            onClick={() => setIsCreateOpen(true)}
+            onClick={() => { setIsCreateOpen(true); setTicketError(null); }}
             className="px-4 py-2 rounded-lg text-xs font-semibold flex items-center space-x-2 transition-all shadow-lg cursor-pointer"
             style={{ backgroundColor: tokens.accentPrimary, color: 'var(--accent-primary-contrast)', boxShadow: `0 10px 15px -3px ${tokens.accentPrimary}10` }}
             onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = tokens.accentPrimary + 'cc'; }}
@@ -906,10 +972,11 @@ export const AgentDashboard: React.FC = () => {
                   id="agent-new-ticket-title"
                   name="title"
                   type="text" 
+                  spellCheck={false}
                   placeholder="e.g., Cannot authenticate via Okta on Macbook"
                   required
                   value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
+                  onChange={(e) => { setNewTitle(e.target.value); setTicketError(null); }}
                   className="w-full rounded-lg px-3 py-2 text-xs outline-none"
                   style={{ backgroundColor: tokens.inputBg, border: `1px solid ${tokens.border}`, color: tokens.textPrimary }}
                   onFocus={(e) => { e.currentTarget.style.borderColor = tokens.accentPrimary; }}
@@ -921,11 +988,12 @@ export const AgentDashboard: React.FC = () => {
                 <textarea 
                   id="agent-new-ticket-description"
                   name="description"
+                  spellCheck={false}
                   placeholder="Explain what happened..."
                   rows={4}
                   required
                   value={newDesc}
-                  onChange={(e) => setNewDesc(e.target.value)}
+                  onChange={(e) => { setNewDesc(e.target.value); setTicketError(null); }}
                   className="w-full rounded-lg px-3 py-2 text-xs outline-none resize-none"
                   style={{ backgroundColor: tokens.inputBg, border: `1px solid ${tokens.border}`, color: tokens.textPrimary }}
                   onFocus={(e) => { e.currentTarget.style.borderColor = tokens.accentPrimary; }}
@@ -957,6 +1025,12 @@ export const AgentDashboard: React.FC = () => {
                   ))}
                 </div>
               </div>
+              {ticketError && (
+                <div className="flex items-start gap-2 p-3 rounded-lg" style={{ backgroundColor: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}>
+                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: '#f87171' }} />
+                  <p className="text-[11px]" style={{ color: '#f87171' }}>{ticketError}</p>
+                </div>
+              )}
               <div 
                 className="flex items-center justify-end space-x-3 pt-4"
                 style={{ borderTop: `1px solid ${tokens.border}cc` }}
@@ -964,26 +1038,37 @@ export const AgentDashboard: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsCreateOpen(false)}
-                  className="px-4 py-2 rounded-lg text-xs font-semibold cursor-pointer"
+                  disabled={isSubmitting}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{ backgroundColor: tokens.cardBgSolid, border: `1px solid ${tokens.border}`, color: tokens.textSecondary }}
-                  onMouseEnter={(e) => { e.currentTarget.style.color = tokens.textPrimary; }}
+                  onMouseEnter={(e) => { if (!isSubmitting) e.currentTarget.style.color = tokens.textPrimary; }}
                   onMouseLeave={(e) => { e.currentTarget.style.color = tokens.textSecondary; }}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-lg text-xs font-semibold cursor-pointer shadow-md"
+                  disabled={isSubmitting}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold cursor-pointer shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{ backgroundColor: tokens.accentPrimary, color: 'var(--accent-primary-contrast)', boxShadow: `0 4px 6px -1px ${tokens.accentPrimary}10` }}
-                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = tokens.accentPrimary + 'cc'; }}
+                  onMouseEnter={(e) => { if (!isSubmitting) e.currentTarget.style.backgroundColor = tokens.accentPrimary + 'cc'; }}
                   onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = tokens.accentPrimary; }}
                 >
-                  Submit Incident Record
+                  {isSubmitting ? 'Creating Ticket...' : 'Submit Incident Record'}
                 </button>
               </div>
             </form>
           </div>
         </div>
+      )}
+
+      {duplicateWarning && (
+        <DuplicateWarningModal
+          warning={duplicateWarning}
+          onDismiss={() => setDuplicateWarning(null)}
+          onCreateAnyway={handleCreateAnyway}
+          isSubmitting={isSubmitting}
+        />
       )}
 
       {/* Reassignment-Away Alerts */}

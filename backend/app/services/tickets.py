@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta
 from math import ceil
+import hashlib
 import json
 import logging
+import re
 from pathlib import Path
 from uuid import uuid4
 
@@ -32,6 +34,11 @@ ALLOWED_COMMENT_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 ALLOWED_COMMENT_IMAGE_CONTENT_TYPES = {"image/png", "image/jpeg", "image/webp"}
 MAX_COMMENT_IMAGE_BYTES = 5 * 1024 * 1024
 
+# Duplicate detection thresholds
+EXACT_MATCH_THRESHOLD = 1.0
+POSSIBLE_DUPLICATE_THRESHOLD = 0.65
+SEMANTIC_SIMILARITY_THRESHOLD = 0.60
+
 # Legacy/imported records may use workflow labels that are not part of the
 # public TicketStatus enum. Keep the API contract stable by mapping those
 # labels to the closest supported lifecycle state at serialization time.
@@ -56,6 +63,211 @@ def is_awaiting_user_response(value: object) -> bool:
         "waiting for user response",
         "awaiting user response",
         "awaiting customer response",
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Duplicate Detection Helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Common stop words to strip during normalization
+_STOP_WORDS = frozenset({
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "could",
+    "should", "may", "might", "shall", "can", "need", "dare", "ought",
+    "used", "to", "of", "in", "for", "on", "with", "at", "by", "from",
+    "as", "into", "through", "during", "before", "after", "above", "below",
+    "between", "out", "off", "over", "under", "again", "further", "then",
+    "once", "here", "there", "when", "where", "why", "how", "all", "each",
+    "every", "both", "few", "more", "most", "other", "some", "such", "no",
+    "not", "only", "own", "same", "so", "than", "too", "very", "just",
+    "because", "but", "and", "or", "if", "while", "about", "against",
+    "it", "its", "this", "that", "these", "those", "i", "me", "my",
+    "myself", "we", "our", "ours", "ourselves", "you", "your", "yours",
+    "yourself", "yourselves", "he", "him", "his", "himself", "she", "her",
+    "hers", "herself", "they", "them", "their", "theirs", "themselves",
+    "what", "which", "who", "whom",
+})
+
+
+def normalize_ticket_text(text: str) -> str:
+    """Normalize ticket text for duplicate comparison.
+
+    Strips punctuation, lowercases, removes stop words, and collapses
+    whitespace so that semantically equivalent titles produce identical
+    normalized strings.
+    """
+    text = text.lower()
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
+    tokens = text.split()
+    tokens = [t for t in tokens if t not in _STOP_WORDS and len(t) > 1]
+    return " ".join(tokens)
+
+
+def _generate_fingerprint(title: str, description: str) -> str:
+    """Generate a SHA-256 fingerprint from normalized title + description."""
+    normalized = normalize_ticket_text(f"{title} {description}")
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def ticket_similarity_score(title_a: str, title_b: str) -> float:
+    """Compute similarity score between two titles.
+
+    Uses embedding-based cosine similarity when the embedding provider is
+    available, falling back to Jaccard word-overlap otherwise.  Returns a
+    float in [0.0, 1.0].  An exact match after normalization returns 1.0.
+    """
+    tokens_a = set(normalize_ticket_text(title_a).split())
+    tokens_b = set(normalize_ticket_text(title_b).split())
+    if not tokens_a and not tokens_b:
+        return 1.0
+    if not tokens_a or not tokens_b:
+        return 0.0
+
+    # Fast path: exact normalized match
+    if tokens_a == tokens_b:
+        return 1.0
+
+    # Try embedding-based cosine similarity for semantic matching
+    try:
+        from app.config.settings import get_settings
+        from app.rag.embedding_provider import EmbeddingProviderFactory
+        settings = get_settings()
+        provider = EmbeddingProviderFactory.create(settings.embedding_provider)
+        emb_a = provider.embed(title_a).embedding
+        emb_b = provider.embed(title_b).embedding
+        # Cosine similarity via dot product (vectors are L2-normalized by provider)
+        dot = sum(a * b for a, b in zip(emb_a, emb_b))
+        norm_a = sum(a * a for a in emb_a) ** 0.5
+        norm_b = sum(b * b for b in emb_b) ** 0.5
+        if norm_a > 0 and norm_b > 0:
+            cosine = dot / (norm_a * norm_b)
+            # Blend embedding similarity with word overlap for robustness
+            jaccard = len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
+            return 0.85 * cosine + 0.15 * jaccard
+    except Exception:
+        logger.debug("Embedding similarity unavailable, falling back to Jaccard")
+
+    # Fallback: Jaccard word-overlap
+    intersection = tokens_a & tokens_b
+    union = tokens_a | tokens_b
+    return len(intersection) / len(union)
+
+
+def classify_duplicate_match(
+    score: float,
+    title: str = "",
+    description: str = "",
+) -> str:
+    """Classify a similarity score into a duplicate status category.
+
+    Returns:
+        "exact"     -- fingerprint-level match (score == 1.0)
+        "possible"  -- semantically similar (score >= threshold)
+        "none"      -- not a duplicate
+    """
+    if score >= EXACT_MATCH_THRESHOLD:
+        return "exact"
+    if score >= POSSIBLE_DUPLICATE_THRESHOLD:
+        return "possible"
+    return "none"
+
+
+async def check_ticket_duplicate(
+    db: AsyncIOMotorDatabase,
+    employee_id: str,
+    title: str,
+    description: str,
+) -> dict:
+    """Check for duplicate tickets from the same employee.
+
+    Two-phase detection:
+      1. Exact fingerprint match against active/open tickets.
+      2. Word-overlap similarity against the employee's recent tickets.
+
+    Returns a dict with keys: status, similarity_score, ticket (or None), message.
+    """
+    fingerprint = _generate_fingerprint(title, description)
+
+    # Phase 1: Exact fingerprint match on active tickets from same employee
+    active_statuses = list(ACTIVE_TICKET_STATUSES)
+    exact_match = await db.tickets.find_one({
+        "created_by": employee_id,
+        "duplicate_fingerprint": fingerprint,
+        "status": {"$in": active_statuses},
+    })
+    if exact_match:
+        return {
+            "status": "exact",
+            "similarity_score": 1.0,
+            "ticket": {
+                "id": exact_match["_id"],
+                "ticket_number": exact_match.get("ticket_number", ""),
+                "title": exact_match.get("title", ""),
+                "status": exact_match.get("status", ""),
+            },
+            "message": "An identical ticket already exists.",
+        }
+
+    # Phase 1b: Also check resolved/closed tickets with same fingerprint (last 30 days)
+    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+    exact_resolved = await db.tickets.find_one({
+        "created_by": employee_id,
+        "duplicate_fingerprint": fingerprint,
+        "created_at": {"$gte": thirty_days_ago},
+    })
+    if exact_resolved:
+        return {
+            "status": "exact",
+            "similarity_score": 1.0,
+            "ticket": {
+                "id": exact_resolved["_id"],
+                "ticket_number": exact_resolved.get("ticket_number", ""),
+                "title": exact_resolved.get("title", ""),
+                "status": exact_resolved.get("status", ""),
+            },
+            "message": "An identical ticket was recently created.",
+        }
+
+    # Phase 2: Semantic similarity against employee's recent tickets
+    # Check active tickets first, then recent tickets (last 30 days)
+    recent_cutoff = datetime.utcnow() - timedelta(days=30)
+    candidate_cursor = db.tickets.find({
+        "created_by": employee_id,
+        "$or": [
+            {"status": {"$in": active_statuses}},
+            {"created_at": {"$gte": recent_cutoff}},
+        ],
+    }).sort("created_at", -1).limit(50)
+    candidates = await candidate_cursor.to_list(length=50)
+
+    best_score = 0.0
+    best_ticket = None
+    for candidate in candidates:
+        cand_title = candidate.get("title", "")
+        score = ticket_similarity_score(title, cand_title)
+        if score > best_score:
+            best_score = score
+            best_ticket = candidate
+
+    if best_score >= POSSIBLE_DUPLICATE_THRESHOLD and best_ticket:
+        return {
+            "status": "possible",
+            "similarity_score": best_score,
+            "ticket": {
+                "id": best_ticket["_id"],
+                "ticket_number": best_ticket.get("ticket_number", ""),
+                "title": best_ticket.get("title", ""),
+                "status": best_ticket.get("status", ""),
+            },
+            "message": "A similar ticket may already exist.",
+        }
+
+    return {
+        "status": "none",
+        "similarity_score": 0.0,
+        "ticket": None,
+        "message": None,
     }
 
 # Category vocabulary is intentionally small and explicit. It lets legacy
@@ -705,6 +917,17 @@ async def create_ticket(db: AsyncIOMotorDatabase, payload: TicketCreate, reason:
     if not assigned_team:
         assigned_team = get_team_from_category(payload.ai_analysis_category)
     
+    # Compute duplicate fingerprint if not already provided
+    duplicate_fingerprint = payload.duplicate_fingerprint
+    if not duplicate_fingerprint:
+        duplicate_fingerprint = _generate_fingerprint(payload.title, payload.description)
+
+    # When the user explicitly chooses "Create Anyway" for an EXACT duplicate,
+    # clear the fingerprint so the partial unique index does not block the insert.
+    # This allows intentional duplicates while still preventing accidental ones.
+    if payload.duplicate_status == "exact" and payload.duplicate_of_ticket_id:
+        duplicate_fingerprint = None
+
     ticket = {
         "_id": ticket_id,
         "ticket_number": await _generate_ticket_number(db),
@@ -735,6 +958,11 @@ async def create_ticket(db: AsyncIOMotorDatabase, payload: TicketCreate, reason:
         "ai_analysis_possible_root_cause": payload.ai_analysis_possible_root_cause,
         "ai_analysis_suggested_resolution": payload.ai_analysis_suggested_resolution,
         "ai_analysis_estimated_sla": payload.ai_analysis_estimated_sla,
+        # Duplicate detection fields
+        "duplicate_of_ticket_id": payload.duplicate_of_ticket_id,
+        "duplicate_status": payload.duplicate_status,
+        "duplicate_similarity_score": payload.duplicate_similarity_score,
+        "duplicate_fingerprint": duplicate_fingerprint,
         "comments": [],
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
@@ -762,7 +990,25 @@ async def create_ticket(db: AsyncIOMotorDatabase, payload: TicketCreate, reason:
             reserved_automatically = ticket["status"] in ACTIVE_TICKET_STATUSES
             break
         selected = await _select_agent(db, ticket, attempted)
-    await db.tickets.insert_one(ticket)
+    try:
+        await db.tickets.insert_one(ticket)
+    except Exception as exc:
+        # Handle race condition: if a duplicate key error occurs on the partial
+        # unique index (created_by + duplicate_fingerprint), find and return
+        # the existing ticket instead of creating a duplicate.
+        if hasattr(exc, "code") and exc.code == 11000:
+            existing = await db.tickets.find_one({
+                "created_by": created_by_id,
+                "duplicate_fingerprint": duplicate_fingerprint,
+                "status": {"$in": list(ACTIVE_TICKET_STATUSES)},
+            })
+            if existing:
+                logger.info(
+                    "Duplicate key race condition caught: returning existing ticket %s",
+                    existing["_id"],
+                )
+                return await get_ticket(db, existing["_id"], {"id": created_by_id, "internal_role": "admin"})
+        raise
     if ticket.get("assigned_to"):
         if ticket["status"] in ACTIVE_TICKET_STATUSES and not reserved_automatically:
             reserved = await _reserve_agent(db, ticket["assigned_to"], ticket["assigned_at"])

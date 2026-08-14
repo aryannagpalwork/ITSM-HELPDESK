@@ -21,6 +21,7 @@ import {
   PlusCircle,
   CheckCircle
 } from 'lucide-react';
+import { DuplicateWarningModal } from '../shared/DuplicateWarningModal';
 
 export const AIChat: React.FC = () => {
   const location = useLocation();
@@ -53,6 +54,7 @@ export const AIChat: React.FC = () => {
     ticketCreatedForIssue,
     createdTicketInfo,
     currentIssueResolved,
+    chatDuplicateWarning,
     contentRef,
     handleSendPrompt,
     handleGuidedYes,
@@ -60,6 +62,8 @@ export const AIChat: React.FC = () => {
     handleConvertTicket,
     handleSatisfactionResolved,
     handleSatisfactionCreateTicket,
+    handleChatCreateAnyway,
+    dismissChatDuplicateWarning,
     continueInThisChat,
     startNewQuery,
     resetThread,
@@ -182,7 +186,7 @@ export const AIChat: React.FC = () => {
   };
 
   const isConversationEnded = () => {
-    return conversationStatus === 'RESOLVED' || conversationStatus === 'ESCALATED';
+    return conversationStatus === 'ISSUE_RESOLVED' || conversationStatus === 'TICKET_CREATED';
   };
 
   const renderSatisfactionCard = () => {
@@ -919,6 +923,15 @@ export const AIChat: React.FC = () => {
           SYSTEM NOTE: Chat logs, metadata, and matched documents are captured to train custom Llama and Gemini operational models.
         </div>
       </div>
+
+      {chatDuplicateWarning && (
+        <DuplicateWarningModal
+          warning={chatDuplicateWarning}
+          onDismiss={dismissChatDuplicateWarning}
+          onCreateAnyway={handleChatCreateAnyway}
+          isSubmitting={isEscalating || isFeedbackLoading}
+        />
+      )}
 
     </div>
   );

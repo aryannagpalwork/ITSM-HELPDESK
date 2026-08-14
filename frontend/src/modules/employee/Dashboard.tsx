@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../shared/AppContext';
 import { 
@@ -61,6 +61,8 @@ export const EmployeeDashboard: React.FC = () => {
     message?: string;
   } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const [ticketError, setTicketError] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [newPriority, setNewPriority] = useState<TicketPriority>('medium');
@@ -185,10 +187,11 @@ export const EmployeeDashboard: React.FC = () => {
 
   const handleCreateTicket = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTitle.trim() || !newDesc.trim()) return;
+    if (!newTitle.trim() || !newDesc.trim() || submittingRef.current) return;
 
     const trimmedTitle = newTitle.trim();
     const trimmedDescription = newDesc.trim();
+    submittingRef.current = true;
     setIsSubmitting(true);
 
     try {
@@ -199,6 +202,7 @@ export const EmployeeDashboard: React.FC = () => {
 
       if (possibleDuplicate.status === 'exact' || possibleDuplicate.status === 'possible') {
         setDuplicateWarning(possibleDuplicate);
+        submittingRef.current = false;
         return;
       }
 
@@ -213,24 +217,21 @@ export const EmployeeDashboard: React.FC = () => {
       setNewPriority('medium');
       setIsCreateOpen(false);
     } catch (error) {
-      console.warn('Duplicate check failed; continuing with creation.', error);
-      await createTicket({
-        title: trimmedTitle,
-        description: trimmedDescription,
-        priority: newPriority,
-      });
-      setNewTitle('');
-      setNewDesc('');
-      setNewPriority('medium');
-      setIsCreateOpen(false);
+      console.error('Duplicate check failed.', error);
+      setTicketError('Unable to verify duplicates. Please try again or contact support.');
+      setIsSubmitting(false);
+      return;
     } finally {
+      submittingRef.current = false;
       setIsSubmitting(false);
     }
   };
 
   const handleCreateAnyway = async () => {
+    if (submittingRef.current) return;
     const trimmedTitle = newTitle.trim();
     const trimmedDescription = newDesc.trim();
+    submittingRef.current = true;
     setDuplicateWarning(null);
     setIsSubmitting(true);
 
@@ -254,6 +255,7 @@ export const EmployeeDashboard: React.FC = () => {
       setNewPriority('medium');
       setIsCreateOpen(false);
     } finally {
+      submittingRef.current = false;
       setIsSubmitting(false);
     }
   };
@@ -313,7 +315,7 @@ const getStatusBadgeColor = (status: TicketStatus) => {
             <span>Chat with AI Helpdesk</span>
           </button>
           <button 
-            onClick={() => setIsCreateOpen(true)}
+            onClick={() => { setIsCreateOpen(true); setTicketError(null); }}
             className="px-4 py-2 accent-btn rounded-lg text-xs font-semibold flex items-center space-x-2 transition-all shadow-lg cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -928,10 +930,11 @@ const getStatusBadgeColor = (status: TicketStatus) => {
                   id="employee-new-ticket-title"
                   name="title"
                   type="text" 
+                  spellCheck={false}
                   placeholder="e.g., Cannot authenticate via Okta on Macbook"
                   required
                   value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
+                  onChange={(e) => { setNewTitle(e.target.value); setTicketError(null); }}
                   className="w-full bg-input border border-token focus:border-[color:var(--accent-primary)] rounded-lg px-3 py-2 text-xs text-primary outline-none"
                 />
               </div>
@@ -940,11 +943,12 @@ const getStatusBadgeColor = (status: TicketStatus) => {
                 <textarea 
                   id="employee-new-ticket-description"
                   name="description"
+                  spellCheck={false}
                   placeholder="Explain what happened, what device you are using, and what steps you have tried..."
                   rows={4}
                   required
                   value={newDesc}
-                  onChange={(e) => setNewDesc(e.target.value)}
+                  onChange={(e) => { setNewDesc(e.target.value); setTicketError(null); }}
                   className="w-full bg-input border border-token focus:border-[color:var(--accent-primary)] rounded-lg px-3 py-2 text-xs text-primary outline-none resize-none"
                 />
               </div>
@@ -967,6 +971,12 @@ const getStatusBadgeColor = (status: TicketStatus) => {
                   ))}
                 </div>
               </div>
+              {ticketError && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                  <AlertTriangle className="w-3.5 h-3.5 text-red-400 mt-0.5 shrink-0" />
+                  <p className="text-[11px] text-red-400">{ticketError}</p>
+                </div>
+              )}
               <div className="flex items-center justify-end space-x-3 pt-4 border-t border-token">
                 <button
                   type="button"

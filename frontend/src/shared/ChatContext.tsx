@@ -1,8 +1,9 @@
 import React, { createContext, useContext, useState, useRef, useEffect } from 'react';
 import { useApp } from './AppContext';
 import { ChatMessage, TicketPriority } from './types';
-import { sendChat, escalateToTicket, submitAIChatFeedback, getChatHistory } from './api';
+import { sendChat, escalateToTicket, submitAIChatFeedback, getChatHistory, checkDuplicateTicket } from './api';
 import type { SatisfactionCard } from './types';
+import type { DuplicateWarning } from './DuplicateWarningModal';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Lifetime: this state lives above the router (mounted once at app root,
@@ -78,6 +79,7 @@ interface ChatContextType {
   activeTicketId: string | null;
   currentIssueResolved: boolean;
   currentIssueShownSatisfaction: boolean;
+  chatDuplicateWarning: DuplicateWarning | null;
   contentRef: React.RefObject<HTMLDivElement | null>;
   handleSendPrompt: (text: string, preserveHistory?: boolean, forceNewSession?: boolean) => Promise<void>;
   handleGuidedYes: () => Promise<void>;
@@ -85,6 +87,8 @@ interface ChatContextType {
   handleConvertTicket: () => Promise<void>;
   handleSatisfactionResolved: () => Promise<void>;
   handleSatisfactionCreateTicket: () => Promise<void>;
+  handleChatCreateAnyway: () => Promise<void>;
+  dismissChatDuplicateWarning: () => void;
   continueInThisChat: () => void;
   startNewQuery: () => void;
   resetThread: () => void;
@@ -117,6 +121,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [activeTicketId, setActiveTicketId] = useState<string | null>(null);
   const [currentIssueResolved, setCurrentIssueResolved] = useState(false);
   const [currentIssueShownSatisfaction, setCurrentIssueShownSatisfaction] = useState(false);
+  const [chatDuplicateWarning, setChatDuplicateWarning] = useState<DuplicateWarning | null>(null);
+  const forceCreateRef = useRef(false);
 
   const contentRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<ChatMessage[]>([WELCOME_MESSAGE]);
@@ -291,11 +297,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     if (!isTyping && pendingSatisfactionCard?.show && !activeSatisfactionCard) {
       setActiveSatisfactionCard(pendingSatisfactionCard);
-      if (pendingSatisfactionCard.reason === 'POSITIVE_TREND') {
-        setConversationStatus('LIKELY_RESOLVED');
-      } else if (pendingSatisfactionCard.reason === 'NEGATIVE_STALL') {
-        setConversationStatus('WAITING_FOR_USER');
-      }
+      setCurrentIssueShownSatisfaction(true);
+      setConversationStatus('AWAITING_SATISFACTION');
       setPendingSatisfactionCard(null);
     }
   }, [isTyping, pendingSatisfactionCard, activeSatisfactionCard]);
@@ -451,6 +454,24 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const handleConvertTicket = async () => {
     if (!suggestedTicket || !sessionId || isEscalating) return;
 
+    if (!forceCreateRef.current) {
+      try {
+        const possibleDuplicate = await checkDuplicateTicket({
+          title: suggestedTicket.title,
+          description: suggestedTicket.description || suggestedTicket.title,
+        });
+        if (possibleDuplicate.status === 'exact' || possibleDuplicate.status === 'possible') {
+          setChatDuplicateWarning(possibleDuplicate);
+          setIsTyping(false);
+          setIsEscalating(false);
+          return;
+        }
+      } catch (_e) {
+        // Duplicate check failed — proceed with ticket creation
+      }
+    }
+    forceCreateRef.current = false;
+
     setIsEscalating(true);
     setIsTyping(true);
     const uniqueId = `sys_${sessionId ? sessionId.slice(0, 8) : 'unknown'}_${Date.now()}`;
@@ -479,7 +500,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       setMessages(prev => [...prev, confirmationMsg]);
       // Mark conversation as escalated/ended after successful ticket creation
-      setConversationStatus('ESCALATED');
+      setConversationStatus('TICKET_CREATED');
       setIsTyping(false);
       setIsEscalating(false);
     } catch (error) {
@@ -535,6 +556,24 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try { await submitAIChatFeedback(sid, 'negative'); } catch (_f) { /* ignore secondary feedback errors */ }
       }
       if (suggestedTicket && sid) {
+        if (!forceCreateRef.current) {
+          try {
+            const possibleDuplicate = await checkDuplicateTicket({
+              title: suggestedTicket.title,
+              description: suggestedTicket.description || suggestedTicket.title,
+            });
+            if (possibleDuplicate.status === 'exact' || possibleDuplicate.status === 'possible') {
+              setChatDuplicateWarning(possibleDuplicate);
+              setIsFeedbackLoading(false);
+              setIsEscalating(false);
+              setIsTyping(false);
+              return;
+            }
+          } catch (_e) {
+            // Duplicate check failed — proceed with ticket creation
+          }
+        }
+        forceCreateRef.current = false;
         await handleConvertTicket();
       } else if (sid) {
         const existingId = (ticketSource === 'FILE_INCIDENT' && activeTicketId) ? activeTicketId : undefined;
@@ -573,6 +612,18 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsEscalating(false);
       setIsTyping(false);
     }
+  };
+
+  const handleChatCreateAnyway = async () => {
+    setChatDuplicateWarning(null);
+    forceCreateRef.current = true;
+    if (suggestedTicket && sessionId) {
+      await handleConvertTicket();
+    }
+  };
+
+  const dismissChatDuplicateWarning = () => {
+    setChatDuplicateWarning(null);
   };
 
   const toggleCollapse = (msgId: string) => {
@@ -660,6 +711,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         activeTicketId,
         currentIssueResolved,
         currentIssueShownSatisfaction,
+        chatDuplicateWarning,
         contentRef,
         handleSendPrompt,
         handleGuidedYes,
@@ -667,6 +719,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         handleConvertTicket,
         handleSatisfactionResolved,
         handleSatisfactionCreateTicket,
+        handleChatCreateAnyway,
+        dismissChatDuplicateWarning,
         continueInThisChat,
         startNewQuery,
         resetThread,

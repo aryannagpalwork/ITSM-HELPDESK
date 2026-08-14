@@ -146,6 +146,36 @@ class UpdateTicketRequest(BaseModel):
     reason: str | None = None
 
 
+class CheckDuplicateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    description: str = Field(min_length=1)
+
+
+class CheckDuplicateResponse(BaseModel):
+    status: str  # "exact" | "possible" | "none"
+    similarity_score: float
+    ticket: dict | None = None
+    message: str | None = None
+
+
+@router.post("/check-duplicate", response_model=CheckDuplicateResponse)
+async def check_duplicate_endpoint(
+    payload: CheckDuplicateRequest,
+    db: DatabaseSession,
+    current_user: dict = Depends(get_current_user),
+) -> CheckDuplicateResponse:
+    """Check for duplicate tickets from the same employee before creation."""
+    from app.services.tickets import check_ticket_duplicate
+
+    result = await check_ticket_duplicate(
+        db=db,
+        employee_id=current_user["id"],
+        title=payload.title,
+        description=payload.description,
+    )
+    return CheckDuplicateResponse(**result)
+
+
 @router.post("", response_model=TicketRead, status_code=status.HTTP_201_CREATED)
 async def create_ticket_endpoint(
     payload: TicketCreate,

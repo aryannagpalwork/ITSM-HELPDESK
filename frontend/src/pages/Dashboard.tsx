@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../shared/AppContext';
+import { checkDuplicateTicket } from '../shared/api';
+import { DuplicateWarningModal, DuplicateWarning } from '../shared/DuplicateWarningModal';
 import { 
   Sparkles, 
   Plus, 
@@ -41,6 +43,10 @@ export const Dashboard: React.FC = () => {
   const [newTitle, setNewTitle] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [newPriority, setNewPriority] = useState<TicketPriority>('medium');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const [duplicateWarning, setDuplicateWarning] = useState<DuplicateWarning | null>(null);
+  const [ticketError, setTicketError] = useState<string | null>(null);
 
   const filteredUserTickets = currentUser.role === 'Employee'
     ? tickets.filter(t => t.userId === currentUser.id)
@@ -48,20 +54,85 @@ export const Dashboard: React.FC = () => {
 
   const handleCreateTicket = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTitle.trim() || !newDesc.trim()) return;
+    if (!newTitle.trim() || !newDesc.trim() || submittingRef.current) return;
 
-    await createTicket({
-      title: newTitle,
-      description: newDesc,
-      priority: newPriority,
-      aiSummary: `AI Summary: Corporate employee requested assistance for: ${newTitle}. Suggested Priority: ${newPriority}. Escalated to level 1 engineering queue.`,
-      suggestedResolution: `Recommended Resolution Steps: 1. Review standard procedures for similar incidents. 2. Verify active directories. 3. Reach out to department lead to coordinate diagnostic tasks.`
-    });
+    const trimmedTitle = newTitle.trim();
+    const trimmedDescription = newDesc.trim();
+    submittingRef.current = true;
+    setIsSubmitting(true);
+    setTicketError(null);
 
-    setNewTitle('');
-    setNewDesc('');
-    setNewPriority('medium');
-    setIsCreateOpen(false);
+    try {
+      const possibleDuplicate = await checkDuplicateTicket({
+        title: trimmedTitle,
+        description: trimmedDescription,
+      });
+
+      if (possibleDuplicate.status === 'exact' || possibleDuplicate.status === 'possible') {
+        setDuplicateWarning(possibleDuplicate);
+        submittingRef.current = false;
+        setIsSubmitting(false);
+        return;
+      }
+
+      await createTicket({
+        title: trimmedTitle,
+        description: trimmedDescription,
+        priority: newPriority,
+        aiSummary: `AI Summary: Corporate employee requested assistance for: ${trimmedTitle}. Suggested Priority: ${newPriority}. Escalated to level 1 engineering queue.`,
+        suggestedResolution: `Recommended Resolution Steps: 1. Review standard procedures for similar incidents. 2. Verify active directories. 3. Reach out to department lead to coordinate diagnostic tasks.`
+      });
+
+      setNewTitle('');
+      setNewDesc('');
+      setNewPriority('medium');
+      setIsCreateOpen(false);
+    } catch (error) {
+      console.error('Ticket creation failed:', error);
+      setTicketError('Unable to verify duplicates. Please try again or contact support.');
+    } finally {
+      submittingRef.current = false;
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCreateAnyway = async () => {
+    if (submittingRef.current) return;
+    const trimmedTitle = newTitle.trim();
+    const trimmedDescription = newDesc.trim();
+    submittingRef.current = true;
+    setDuplicateWarning(null);
+    setIsSubmitting(true);
+    setTicketError(null);
+
+    try {
+      await createTicket(
+        {
+          title: trimmedTitle,
+          description: trimmedDescription,
+          priority: newPriority,
+          aiSummary: `AI Summary: Corporate employee requested assistance for: ${trimmedTitle}. Suggested Priority: ${newPriority}. Escalated to level 1 engineering queue.`,
+          suggestedResolution: `Recommended Resolution Steps: 1. Review standard procedures for similar incidents. 2. Verify active directories. 3. Reach out to department lead to coordinate diagnostic tasks.`
+        },
+        undefined,
+        duplicateWarning ? {
+          duplicateOfTicketId: duplicateWarning.ticket?.id,
+          duplicateStatus: duplicateWarning.status,
+          duplicateSimilarityScore: duplicateWarning.similarity_score,
+        } : undefined,
+      );
+
+      setNewTitle('');
+      setNewDesc('');
+      setNewPriority('medium');
+      setIsCreateOpen(false);
+    } catch (error) {
+      console.error('Ticket creation failed:', error);
+      setTicketError('Failed to create ticket. Please try again.');
+    } finally {
+      submittingRef.current = false;
+      setIsSubmitting(false);
+    }
   };
 
   const getPriorityBadgeColor = (prio: TicketPriority) => {
@@ -122,7 +193,7 @@ const getStatusBadgeColor = (status: TicketStatus) => {
             <span>Chat with AI Copilot</span>
           </button>
           <button 
-            onClick={() => setIsCreateOpen(true)}
+            onClick={() => { setIsCreateOpen(true); setTicketError(null); }}
             className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center space-x-2 transition-all shadow-lg shadow-indigo-600/10 cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -457,10 +528,11 @@ const getStatusBadgeColor = (status: TicketStatus) => {
                 <label className="block text-[10px] font-mono uppercase tracking-wider text-zinc-500 mb-1">Incident Headline / Summary</label>
                 <input 
                   type="text" 
+                  spellCheck={false}
                   placeholder="e.g., Cannot authenticate via Okta on Macbook laptop"
                   required
                   value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
+                  onChange={(e) => { setNewTitle(e.target.value); setTicketError(null); }}
                   className="w-full bg-zinc-950 border border-zinc-800 focus:border-indigo-500 rounded-lg px-3 py-2 text-xs text-white outline-none"
                 />
               </div>
@@ -468,11 +540,12 @@ const getStatusBadgeColor = (status: TicketStatus) => {
               <div>
                 <label className="block text-[10px] font-mono uppercase tracking-wider text-zinc-500 mb-1">Full Technical Description</label>
                 <textarea 
+                  spellCheck={false}
                   placeholder="Explain what happened, what device you are running, and what debugging steps you have tried..."
                   rows={4}
                   required
                   value={newDesc}
-                  onChange={(e) => setNewDesc(e.target.value)}
+                  onChange={(e) => { setNewDesc(e.target.value); setTicketError(null); }}
                   className="w-full bg-zinc-950 border border-zinc-800 focus:border-indigo-500 rounded-lg px-3 py-2 text-xs text-white outline-none resize-none"
                 />
               </div>
@@ -497,24 +570,42 @@ const getStatusBadgeColor = (status: TicketStatus) => {
                 </div>
               </div>
 
+              {ticketError && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                  <AlertCircle className="w-3.5 h-3.5 text-red-400 mt-0.5 shrink-0" />
+                  <p className="text-[11px] text-red-400">{ticketError}</p>
+                </div>
+              )}
+
               <div className="flex items-center justify-end space-x-3 pt-4 border-t border-zinc-800/80">
                 <button
                   type="button"
                   onClick={() => setIsCreateOpen(false)}
-                  className="px-4 py-2 rounded-lg text-xs font-semibold text-zinc-400 hover:text-white bg-zinc-900 border border-zinc-800 cursor-pointer"
+                  disabled={isSubmitting}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold text-zinc-400 hover:text-white bg-zinc-900 border border-zinc-800 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer shadow-md shadow-indigo-600/10"
+                  disabled={isSubmitting}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer shadow-md shadow-indigo-600/10 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Submit Incident Record
+                  {isSubmitting ? 'Creating Ticket...' : 'Submit Incident Record'}
                 </button>
               </div>
             </form>
           </div>
         </div>
+      )}
+
+      {duplicateWarning && (
+        <DuplicateWarningModal
+          warning={duplicateWarning}
+          onDismiss={() => setDuplicateWarning(null)}
+          onCreateAnyway={handleCreateAnyway}
+          isSubmitting={isSubmitting}
+        />
       )}
 
     </div>
