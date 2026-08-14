@@ -267,8 +267,21 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const simulateTyping = async (text: string, msgId: string) => {
-    setTypingText('');
-    const indexRef = { current: 0 };
+    if (!text) {
+      setTypingText('');
+      const botMsg: ChatMessage = {
+        id: msgId,
+        sender: 'assistant',
+        text: text,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages(prev => [...prev, botMsg]);
+      setIsTyping(false);
+      return;
+    }
+
+    setTypingText(text.charAt(0));
+    const indexRef = { current: 1 };
     const speed = 15;
 
     const typeChar = () => {
@@ -290,7 +303,11 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     };
 
-    typeChar();
+    if (text.length > 1) {
+      setTimeout(typeChar, speed);
+    } else {
+      typeChar();
+    }
   };
 
   // When typing finishes, show any pending satisfaction card

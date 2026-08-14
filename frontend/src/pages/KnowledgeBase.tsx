@@ -37,6 +37,14 @@ export const KnowledgeBase: React.FC = () => {
     loadDocuments();
   }, []);
 
+  const handleCancelUpload = () => {
+    setIsModalOpen(false);
+    setUploadFile(null);
+    setUploadTitle('');
+    setUploadCategory('');
+    setUploadTags('');
+  };
+
   const clearSelectedFile = () => {
     setUploadFile(null);
   };
@@ -222,7 +230,7 @@ export const KnowledgeBase: React.FC = () => {
                 Upload Document
               </h3>
               <button
-                onClick={() => setIsModalOpen(false)}
+                onClick={handleCancelUpload}
                 className="p-1.5 text-secondary hover-text hover-elev rounded-lg transition-all"
               >
                 <X className="w-4 h-4" />
@@ -245,12 +253,21 @@ export const KnowledgeBase: React.FC = () => {
                 onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
               />
               {uploadFile ? (
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center justify-center gap-3">
-                    <File className="w-8 h-8 text-accent" />
-                    <div className="text-left">
-                      <p className="text-sm font-medium text-primary">{uploadFile.name}</p>
-                      <p className="text-xs text-tertiary">{(uploadFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <File className="w-8 h-8 text-accent shrink-0" />
+                    <div className="text-left min-w-0 flex-1">
+                      <div className="text-sm font-medium text-primary flex items-center max-w-full overflow-hidden" title={uploadFile.name}>
+                        {uploadFile.name.lastIndexOf('.') > 0 ? (
+                          <>
+                            <span className="truncate">{uploadFile.name.substring(0, uploadFile.name.lastIndexOf('.'))}</span>
+                            <span className="shrink-0">{uploadFile.name.substring(uploadFile.name.lastIndexOf('.'))}</span>
+                          </>
+                        ) : (
+                          <span className="truncate">{uploadFile.name}</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-tertiary mt-0.5">{(uploadFile.size / 1024 / 1024).toFixed(2)} MB</p>
                     </div>
                   </div>
                   <button
@@ -317,11 +334,11 @@ export const KnowledgeBase: React.FC = () => {
             <div className="flex items-center justify-end space-x-3 pt-4 border-t border-token">
               <button
                 type="button"
-                onClick={() => setIsModalOpen(false)}
+                onClick={handleCancelUpload}
                 className="px-4 py-2 rounded-lg text-xs font-semibold text-secondary hover-text bg-card border border-token cursor-pointer"
                 disabled={isUploading}
               >
-                Cancel
+                Discard / Cancel
               </button>
               <button
                 type="button"

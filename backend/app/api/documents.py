@@ -242,10 +242,7 @@ async def delete_document(
     await embedding_service.delete_document(document_id)
     embedding_service.save_index()
 
-    await db["knowledge_documents"].update_one(
-        {"_id": document_id},
-        {"$set": {"status": "deleted", "updated_at": datetime.utcnow().isoformat()}}
-    )
+    await db["knowledge_documents"].delete_one({"_id": document_id})
 
 
 @router.get("/{document_id}/download")

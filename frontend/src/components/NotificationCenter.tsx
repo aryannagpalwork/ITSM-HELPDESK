@@ -223,7 +223,8 @@ export const NotificationCenter: React.FC = () => {
 
   // ── Click handlers ──
 
-  const handleItemClick = async (item: MergedItem) => {
+  const handleMarkAsRead = async (e: React.MouseEvent, item: MergedItem) => {
+    e.stopPropagation();
     if (item.itemType === 'notification' && item.originalNotif) {
       const notif = item.originalNotif;
       if (!notif.read) {
@@ -236,9 +237,13 @@ export const NotificationCenter: React.FC = () => {
           // ignore
         }
       }
-      // For Employee: marking read causes it to disappear (filtered out above).
-      // For Agent: marking read only dims it — item stays in list.
     }
+  };
+
+  const handleItemClick = async (item: MergedItem) => {
+    // Clicking a notification no longer automatically marks it as read.
+    // Navigation or detail opening logic would go here.
+    
     // Clicking an alert item: no action for agents (stays as-is).
     // For employees: dismiss it.
     if (item.itemType === 'alert' && item.originalAlert && isEmployee) {
@@ -459,23 +464,14 @@ export const NotificationCenter: React.FC = () => {
                         <div className="mt-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[10px] text-zinc-400">
                           <span>{formatRelativeTime(item.createdAt)}</span>
                           <div className="flex items-center gap-2">
-                            {!isAlertItem && !isRead && isAgent && (
+                            {!isAlertItem && !isRead && (
                               <button
                                 type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleItemClick(item);
-                                }}
+                                onClick={(e) => handleMarkAsRead(e, item)}
                                 className="text-[10px] font-semibold text-amber-400 hover:text-amber-300 transition-colors"
                               >
                                 Mark as read
                               </button>
-                            )}
-                            {!isAlertItem && !isRead && isAgent && (
-                              <span className="text-zinc-500">Click to mark read</span>
-                            )}
-                            {!isAlertItem && !isRead && isEmployee && (
-                              <span className="text-zinc-500">Click to dismiss</span>
                             )}
                             {isRead && (
                               <span className="text-zinc-600 italic">Read</span>
