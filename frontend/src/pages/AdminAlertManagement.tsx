@@ -281,7 +281,7 @@ export const AdminAlertManagement: React.FC = () => {
                     }}
                     className="w-4 h-4 rounded border-border bg-app text-blue-500 cursor-pointer"
                   />
-                  <span className="text-xs text-secondary !text-white">Agents</span>
+                  <span className="text-xs text-secondary !text-white ">Agents</span>
                 </label>
               </div>
               <span className="text-[10px] text-tertiary block !text-white ">
