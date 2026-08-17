@@ -284,7 +284,7 @@ export const AdminAlertManagement: React.FC = () => {
                   <span className="text-xs text-secondary !text-white">Agents</span>
                 </label>
               </div>
-              <span className="text-[10px] text-tertiary block !text-white">
+              <span className="text-[10px] text-tertiary block !text-white ">
                 Select who receives notifications about this alert
               </span>
             </div>
