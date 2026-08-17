@@ -249,7 +249,7 @@ export const AdminAlertManagement: React.FC = () => {
             </div>
 
             <div className="bg-zinc-900 rounded-xl p-3 border border-border space-y-2">
-              <label className="block text-xs font-semibold text-secondary">
+              <label className="block text-xs font-semibold text-secondary !text-white">
                 Notify Recipients <span className="text-rose-400">*</span>
               </label>
               <div className="space-y-2">
@@ -266,7 +266,7 @@ export const AdminAlertManagement: React.FC = () => {
                     }}
                     className="w-4 h-4 rounded border-border bg-app text-blue-500 cursor-pointer"
                   />
-                  <span className="text-xs text-secondary">Employees</span>
+                  <span className="text-xs text-secondary !text-white">Employees</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -281,10 +281,10 @@ export const AdminAlertManagement: React.FC = () => {
                     }}
                     className="w-4 h-4 rounded border-border bg-app text-blue-500 cursor-pointer"
                   />
-                  <span className="text-xs text-secondary">Agents</span>
+                  <span className="text-xs text-secondary !text-white">Agents</span>
                 </label>
               </div>
-              <span className="text-[10px] text-tertiary block">
+              <span className="text-[10px] text-tertiary block !text-white">
                 Select who receives notifications about this alert
               </span>
             </div>
