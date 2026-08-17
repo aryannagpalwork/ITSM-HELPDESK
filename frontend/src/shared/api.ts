@@ -22,9 +22,7 @@ import {
 // Use the browser's host by default so the UI also works when opened through
 // localhost, a LAN address, or another development hostname. Set
 // VITE_API_BASE_URL when the API is hosted separately.
-const configuredApiBase = import.meta.env.VITE_API_BASE_URL?.trim();
-
-const API_BASE_URL = configuredApiBase || 'http://127.0.0.1:8000';
+const API_BASE_URL = 'https://itsm-kncr.onrender.com';
 
 const API_BASE_URL_FALLBACKS = [API_BASE_URL];
 
