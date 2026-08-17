@@ -1,5 +1,6 @@
 """Text extraction interface for RAG pipeline."""
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -7,6 +8,8 @@ from pathlib import Path
 import re
 
 from app.rag.document_loader import LoadedDocument, DocumentLoader, FileDocumentLoader
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -169,37 +172,68 @@ class PDFTextExtractor(TextExtractor):
                 # Extract text
                 page_text = page.get_text()
                 text_parts.append(page_text)
-                
-                # Extract headings (simplified)
-                blocks = page.get_text("dict")["blocks"]
-                for block in blocks:
-                    if block["type"] == 0:  # Text block
-                        for line in block["lines"]:
-                            for span in line["spans"]:
-                                # Check for bold/large text as headings
-                                if span["size"] > 14 or span["flags"] & 16:  # Bold flag
-                                    heading_text = span["text"].strip()
-                                    if heading_text:
-                                        headings.append(heading_text)
-                
-                # Extract links
-                page_links = page.get_links()
-                for link in page_links:
-                    if "uri" in link:
-                        links.append({
-                            "page": page_num,
-                            "uri": link["uri"],
-                            "rect": str(link["rect"])
-                        })
-                
+
+                # Extract headings (simplified). This is supplementary
+                # structure metadata, not the core extracted text (that's
+                # page_text above) -- a single malformed span must never
+                # abort extraction for the whole document.
+                try:
+                    blocks = page.get_text("dict")["blocks"]
+                    for block in blocks:
+                        if block["type"] == 0:  # Text block
+                            for line in block["lines"]:
+                                for span in line["spans"]:
+                                    # Check for bold/large text as headings
+                                    if span["size"] > 14 or span["flags"] & 16:  # Bold flag
+                                        heading_text = span["text"].strip()
+                                        if heading_text:
+                                            headings.append(heading_text)
+                except Exception:
+                    logger.warning(
+                        "Failed to extract headings on page %d; continuing without them",
+                        page_num, exc_info=True,
+                    )
+
+                # Extract links. PyMuPDF's get_links() uses "from" for the
+                # bounding rect, not "rect" -- and link metadata is
+                # supplementary (not needed for retrieval), so any
+                # unexpected link shape is skipped rather than failing the
+                # whole document.
+                try:
+                    page_links = page.get_links()
+                    for link in page_links:
+                        if "uri" in link:
+                            try:
+                                links.append({
+                                    "page": page_num,
+                                    "uri": link["uri"],
+                                    "rect": str(link.get("from", "")),
+                                })
+                            except Exception:
+                                logger.warning(
+                                    "Skipping malformed PDF link on page %d",
+                                    page_num, exc_info=True,
+                                )
+                except Exception:
+                    logger.warning(
+                        "Failed to extract links on page %d; continuing without them",
+                        page_num, exc_info=True,
+                    )
+
                 # Extract images (info only)
-                image_list = page.get_images()
-                for img_idx, img in enumerate(image_list):
-                    images.append({
-                        "page": page_num,
-                        "index": img_idx,
-                        "xref": img[0]
-                    })
+                try:
+                    image_list = page.get_images()
+                    for img_idx, img in enumerate(image_list):
+                        images.append({
+                            "page": page_num,
+                            "index": img_idx,
+                            "xref": img[0]
+                        })
+                except Exception:
+                    logger.warning(
+                        "Failed to extract image info on page %d; continuing without it",
+                        page_num, exc_info=True,
+                    )
             
             full_text = "\n\n".join(text_parts)
             normalized_text = self.normalize_text(full_text)

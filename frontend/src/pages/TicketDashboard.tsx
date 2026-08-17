@@ -254,7 +254,7 @@ export const TicketDashboard: React.FC = () => {
   <option value="waiting_for_user_response" className="bg-card-solid text-secondary">Waiting for User Response</option>
   <option value="resolved" className="bg-card-solid text-secondary">Resolved</option>
   <option value="closed" className="bg-card-solid text-secondary">Closed</option>
-              {currentUser.role === 'Administrator' && <option value="resolved_ai" className="bg-card-solid text-secondary">Resolved by AI</option>}
+              <option value="resolved_ai" className="bg-card-solid text-secondary">Resolved by AI</option>
             </select>
           </div>
 

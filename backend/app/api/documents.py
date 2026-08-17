@@ -1,4 +1,3 @@
-
 import hashlib
 import os
 from pathlib import Path
@@ -35,6 +34,7 @@ UPLOAD_DIR = Path(__file__).parent.parent.parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
+MAX_UPLOAD_SIZE_BYTES = 25 * 1024 * 1024  # 25MB -- adjust if you routinely need larger KB docs
 
 
 def get_file_type(filename: str) -> str:
@@ -111,6 +111,17 @@ async def upload_document(
     saved_filename = f"{uuid4()}_{filename}"
     file_path = UPLOAD_DIR / saved_filename
     content = await file.read()
+
+    if len(content) > MAX_UPLOAD_SIZE_BYTES:
+        logger.info(
+            "Knowledge-base upload rejected: filename=%s size=%d bytes exceeds limit=%d bytes",
+            filename, len(content), MAX_UPLOAD_SIZE_BYTES,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File exceeds maximum upload size of {MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)}MB",
+        )
+
     with open(file_path, "wb") as f:
         f.write(content)
     file_size = os.path.getsize(file_path)

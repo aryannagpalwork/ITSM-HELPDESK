@@ -154,7 +154,7 @@ async def _notify_employee_for_agent_response(db: AsyncIOMotorDatabase, ticket: 
     })
 
 
-async def _notify_assignment(db: AsyncIOMotorDatabase, ticket: dict, agent: dict, *, is_reassignment: bool = False) -> None:
+async def _notify_assignment(db: AsyncIOMotorDatabase, ticket: dict, agent: dict, *, is_reassignment: bool = False, skip_requester_notification: bool = False) -> None:
     """Persist assignment notifications for the agent and requester.
 
     Message branches on three things: whether the recipient IS the requester,
@@ -166,7 +166,7 @@ async def _notify_assignment(db: AsyncIOMotorDatabase, ticket: dict, agent: dict
     requester_is_agent = bool(requester and requester.get("role") == "agent")
 
     recipient_ids = [agent["_id"]]
-    if requester_id and requester_id != agent["_id"]:
+    if requester_id and requester_id != agent["_id"] and not skip_requester_notification:
         recipient_ids.append(requester_id)
 
     def _message_for(recipient_id: str) -> str:
@@ -785,7 +785,13 @@ async def create_ticket(db: AsyncIOMotorDatabase, payload: TicketCreate, reason:
         )
         assigned_agent = await db.users.find_one({"_id": ticket["assigned_to"]})
         if assigned_agent:
-            await _notify_assignment(db, ticket, assigned_agent)
+            ai_created_ticket = bool(payload.ai_resolved) or str(payload.resolution_source or "").lower() == "ai" or str(reason or "").lower() == "resolved by ai"
+            await _notify_assignment(
+                db,
+                ticket,
+                assigned_agent,
+                skip_requester_notification=ai_created_ticket,
+            )
     if not ticket.get("assigned_to"):
         await _notify_unassigned_ticket(db, ticket)
     await _write_audit(
