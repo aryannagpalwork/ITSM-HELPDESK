@@ -1143,13 +1143,49 @@ async def chat(
     guided_metadata = dict(conversation_metadata.get("guided", {}) or {})
     guided_phase = str(guided_metadata.get("phase") or "DIAGNOSIS")
     original_issue = str(guided_metadata.get("original_issue") or payload.query)
-    retrieval_query = (
-        f"Original issue: {original_issue}\n"
-        f"Diagnostic answers: {json.dumps(guided_metadata.get('diagnostic_answers', []))}\n"
-        f"Previous troubleshooting: {json.dumps(guided_metadata.get('previous_troubleshooting_steps', []))}\n"
-        f"User observations: {json.dumps(guided_metadata.get('user_observations', []))}\n"
-        f"Conversation: {_conversation_text(chat_history, payload.query)}"
-    )
+
+    # Retrieval-specific query -- kept SHORT and signal-dense on purpose.
+    # Embedding search degrades as query text grows: retriever.py's
+    # keyword-overlap score divides matches by the TOTAL DISTINCT TERM
+    # COUNT of the query, so a short focused query ("warranty") scores far
+    # higher on a real match than the same match buried in a multi-hundred-
+    # word blob. The single embedding vector for a long blob also gets
+    # pulled toward whatever topic dominates the transcript (e.g. several
+    # paragraphs about ECG/DXL features), drowning a short specific
+    # follow-up like "warranty conditions". The JSON troubleshooting fields
+    # and full transcript are valuable context for LLM prompts (see
+    # _guided_decision below, which still uses full _conversation_text) but
+    # are noise for a vector search query, so they're intentionally
+    # excluded / trimmed here.
+    diagnostic_answers = guided_metadata.get("diagnostic_answers", [])
+
+    # Recent conversational context for retrieval: bounded by CHARACTER
+    # BUDGET, not turn count. Turn count is a weak proxy -- a single
+    # verbose assistant reply (e.g. a bulleted feature list) can blow the
+    # noise budget within "2 exchanges" just as badly as a long transcript
+    # can. User messages carry the real intent signal (short, specific
+    # follow-ups like "warranty" or "conditions for it"); assistant replies
+    # mostly restate KB content already indexed, so their contribution here
+    # is capped hard and kept short -- just enough to catch a referenced
+    # term ("W03") without re-injecting a full prior answer.
+    RECENT_USER_TURNS = 3
+    ASSISTANT_SNIPPET_CHARS = 150
+    TOTAL_RECENT_TEXT_CHARS = 600
+
+    recent_user_msgs = [m.content for m in chat_history if m.role == MessageRole.USER][-RECENT_USER_TURNS:]
+    last_assistant_msgs = [m.content for m in chat_history if m.role == MessageRole.ASSISTANT][-1:]
+    last_assistant_snippet = (last_assistant_msgs[0][:ASSISTANT_SNIPPET_CHARS] if last_assistant_msgs else "")
+
+    recent_turns_parts = recent_user_msgs + ([last_assistant_snippet] if last_assistant_snippet else []) + [payload.query]
+    recent_turns = "\n".join(recent_turns_parts)[-TOTAL_RECENT_TEXT_CHARS:]
+
+    retrieval_query_parts = [original_issue]
+    if diagnostic_answers:
+        # Diagnostic answers are short, specific facts (e.g. "printer model:
+        # HP LaserJet") -- dense signal, not noise, so these stay.
+        retrieval_query_parts.append(" ".join(str(a) for a in diagnostic_answers))
+    retrieval_query_parts.append(recent_turns)
+    retrieval_query = "\n".join(part for part in retrieval_query_parts if part)
     rag_settings = get_rag_settings()
     configured_threshold = rag_settings.similarity_threshold
     retrieval_threshold = (
