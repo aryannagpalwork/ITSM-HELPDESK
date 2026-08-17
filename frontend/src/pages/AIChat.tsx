@@ -18,8 +18,10 @@ import {
   MessageSquare, 
   Bot,
   User,
-  PlusCircle
+  PlusCircle,
+  CheckCircle
 } from 'lucide-react';
+import { DuplicateWarningModal } from '../shared/DuplicateWarningModal';
 
 export const AIChat: React.FC = () => {
   const location = useLocation();
@@ -49,6 +51,10 @@ export const AIChat: React.FC = () => {
     guidedState,
     isEscalating,
     isFeedbackLoading,
+    ticketCreatedForIssue,
+    createdTicketInfo,
+    currentIssueResolved,
+    chatDuplicateWarning,
     contentRef,
     handleSendPrompt,
     handleGuidedYes,
@@ -56,6 +62,10 @@ export const AIChat: React.FC = () => {
     handleConvertTicket,
     handleSatisfactionResolved,
     handleSatisfactionCreateTicket,
+    handleChatCreateAnyway,
+    dismissChatDuplicateWarning,
+    continueInThisChat,
+    startNewQuery,
     resetThread,
   } = useChat();
 
@@ -65,6 +75,11 @@ export const AIChat: React.FC = () => {
     const isProcessingRef = useRef(false);
     const conversationEndedRef = useRef(false);
     const isAtBottomRef = useRef(true);
+    const conversationStatusRef = useRef(conversationStatus);
+
+    useEffect(() => {
+      conversationStatusRef.current = conversationStatus;
+    }, [conversationStatus]);
 
     const beginProcessing = () => {
       if (isProcessingRef.current) return false;
@@ -81,7 +96,7 @@ export const AIChat: React.FC = () => {
     const handleSendPromptWrapper = async (textToSend: string) => {
       if (!textToSend.trim() || !beginProcessing()) return;
 
-      const isFreshQuery = conversationEndedRef.current || conversationStatus === 'RESOLVED';
+      const isFreshQuery = conversationEndedRef.current || conversationStatusRef.current === 'ISSUE_RESOLVED';
       conversationEndedRef.current = false;
 
       try {
@@ -171,11 +186,11 @@ export const AIChat: React.FC = () => {
   };
 
   const isConversationEnded = () => {
-    return conversationStatus === 'RESOLVED' || conversationStatus === 'ESCALATED';
+    return conversationStatus === 'ISSUE_RESOLVED' || conversationStatus === 'TICKET_CREATED';
   };
 
   const renderSatisfactionCard = () => {
-    if (!activeSatisfactionCard?.show || guidedActions.length > 0 || guidedState === 'NO_SOLUTION') return null;
+    if (ticketCreatedForIssue || currentIssueResolved || !activeSatisfactionCard?.show || guidedState === 'NO_SOLUTION') return null;
     const isPositive = activeSatisfactionCard.reason === 'POSITIVE_TREND';
     const title = isPositive
       ? 'Glad that helped — was your issue fully resolved?'
@@ -250,7 +265,7 @@ export const AIChat: React.FC = () => {
   };
 
   const renderGuidedActions = () => {
-    if (isProcessing || suggestedTicket?.ticketId || guidedActions.length < 2 || guidedState === 'RESOLVED' || guidedState === 'NO_SOLUTION') return null;
+    if (ticketCreatedForIssue || currentIssueResolved || isProcessing || suggestedTicket?.ticketId || guidedActions.length < 2 || guidedState === 'RESOLVED' || guidedState === 'NO_SOLUTION') return null;
     return (
       <div className="flex justify-center mt-2">
         <div className="max-w-xl w-full flex gap-2">
@@ -563,6 +578,70 @@ export const AIChat: React.FC = () => {
           {/* Conversation Satisfaction Prompt — rendered exactly once when the backend signals it. */}
           {renderSatisfactionCard()}
           {renderGuidedActions()}
+
+          {/* Frozen state after ticket creation OR AI resolution */}
+          {(ticketCreatedForIssue || currentIssueResolved) && (
+            <div className="flex justify-center mt-2">
+              <div
+                className="max-w-xl w-full rounded-2xl p-5"
+                style={{
+                  backgroundColor: tokens.statusSuccessBg,
+                  border: `1px solid ${tokens.statusSuccess}26`,
+                }}
+              >
+                <div className="flex items-center space-x-2 mb-2">
+                  <CheckCircle className="w-4 h-4" style={{ color: tokens.statusSuccess }} />
+                  <h5 className="text-xs font-bold" style={{ color: 'var(--text-primary)' }}>
+                    {ticketCreatedForIssue && createdTicketInfo
+                      ? `Ticket ${createdTicketInfo.ticketNumber} has been created and handed over to IT Support.`
+                      : 'Your issue has been resolved by AI.'}
+                  </h5>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-2 mt-4">
+                  <button
+                    disabled={isProcessing || isTyping}
+                    className="flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                    style={{
+                      backgroundColor: tokens.accentPrimary,
+                      color: 'var(--accent-primary-contrast)',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isProcessing && !isTyping) e.currentTarget.style.opacity = '0.9';
+                    }}
+                    onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
+                    onClick={() => {
+                      continueInThisChat();
+                      conversationEndedRef.current = false;
+                    }}
+                  >
+                    Continue in This Chat
+                  </button>
+                  <button
+                    disabled={isProcessing || isTyping}
+                    className="flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed border shadow-sm"
+                    style={{
+                      backgroundColor: 'var(--card-bg-solid)',
+                      color: 'var(--text-primary)',
+                      borderColor: 'var(--border)',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isProcessing && !isTyping) e.currentTarget.style.backgroundColor = 'var(--hover)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'var(--card-bg-solid)';
+                    }}
+                    onClick={() => {
+                      if (isProcessingRef.current) return;
+                      startNewQuery();
+                      conversationEndedRef.current = false;
+                    }}
+                  >
+                    Start a New Conversation
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Input Bar Section */}
@@ -590,13 +669,19 @@ export const AIChat: React.FC = () => {
                 ref={inputRef}
                 id="ai-copilot-message"
                 name="message"
-                placeholder="Ask IT support or troubleshoot connection problems..."
+                placeholder={(ticketCreatedForIssue || currentIssueResolved) ? "Issue resolved. Choose an action below." : "Ask IT support or troubleshoot connection problems..."}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onInput={autoResize}
                 disabled={isProcessing || isTyping || isConversationEnded()}
                 onKeyDown={(e) => {
-                  if (!isProcessing && !isTyping && !isConversationEnded() && e.key === 'Enter' && !e.shiftKey) {
+                  if (
+                    !isProcessing &&
+                    !isTyping &&
+                    !isConversationEnded() &&
+                    e.key === 'Enter' &&
+                    !e.shiftKey
+                  ) {
                     e.preventDefault();
                     handleSendPromptWrapper(input);
                   }
@@ -640,7 +725,58 @@ export const AIChat: React.FC = () => {
             <span>AI Copilot Analysis</span>
           </div>
 
-          {suggestedTicket && suggestedTicket.show ? (
+          {ticketCreatedForIssue && createdTicketInfo ? (
+            <div
+              className="p-5 rounded-xl"
+              style={{
+                backgroundColor: 'var(--card-bg)',
+                border: `1px solid ${tokens.statusSuccess}26`,
+              }}
+            >
+              <div className="flex items-center space-x-2 mb-3" style={{ color: tokens.statusSuccess }}>
+                <CheckCircle className="w-4 h-4" />
+                <h4 className="text-xs font-semibold">Ticket Created</h4>
+              </div>
+              <div
+                className="space-y-3 p-3 rounded-lg mb-3"
+                style={{ backgroundColor: 'var(--card-bg-solid)', border: '1px solid var(--border)' }}
+              >
+                <div>
+                  <span className="block text-[8px] font-mono uppercase" style={{ color: 'var(--text-tertiary)' }}>Ticket Reference</span>
+                  <h5 className="text-[10px] font-semibold font-mono mt-0.5" style={{ color: 'var(--text-primary)' }}>{createdTicketInfo.ticketNumber}</h5>
+                </div>
+                <div>
+                  <span className="block text-[8px] font-mono uppercase" style={{ color: 'var(--text-tertiary)' }}>Status</span>
+                  <span className="block text-[9px] font-mono font-semibold uppercase mt-0.5" style={{ color: tokens.statusSuccess }}>OPEN</span>
+                </div>
+              </div>
+              <p
+                className="text-[10px] leading-relaxed"
+                style={{ color: 'var(--text-secondary)' }}
+              >
+                Your issue has been handed over to IT Support. Use <strong>Continue in This Chat</strong> to add more context, or <strong>Start a New Conversation</strong> for a different issue.
+              </p>
+            </div>
+          ) : currentIssueResolved ? (
+            <div
+              className="p-5 rounded-xl"
+              style={{
+                backgroundColor: 'var(--card-bg)',
+                border: `1px solid ${tokens.statusSuccess}26`,
+              }}
+            >
+              <div className="flex items-center space-x-2 mb-3" style={{ color: tokens.statusSuccess }}>
+                <CheckCircle className="w-4 h-4" />
+                <h4 className="text-xs font-semibold">Issue Resolved by AI</h4>
+              </div>
+              <p
+                className="text-[10px] leading-relaxed"
+                style={{ color: 'var(--text-secondary)' }}
+              >
+                Your issue has been successfully resolved by the AI Copilot. Use <strong>Continue in This Chat</strong> to ask follow-up questions, or <strong>Start a New Conversation</strong> for a different issue.
+              </p>
+            </div>
+          ) : suggestedTicket && suggestedTicket.show ? (
             <div 
               className="p-5 rounded-xl"
               style={{ 
@@ -787,6 +923,15 @@ export const AIChat: React.FC = () => {
           SYSTEM NOTE: Chat logs, metadata, and matched documents are captured to train custom Llama and Gemini operational models.
         </div>
       </div>
+
+      {chatDuplicateWarning && (
+        <DuplicateWarningModal
+          warning={chatDuplicateWarning}
+          onDismiss={dismissChatDuplicateWarning}
+          onCreateAnyway={handleChatCreateAnyway}
+          isSubmitting={isEscalating || isFeedbackLoading}
+        />
+      )}
 
     </div>
   );

@@ -43,7 +43,7 @@ from bson import ObjectId
 logger = logging.getLogger(__name__)
 
 UNKNOWN_IT_QUERY_RESPONSE = (
-    "Sorry, this time we don't have enough knowledge to answer this. Our IT team is always here to help you. Please connect with them by pressing the File/Ticket button in the sidebar."
+    "I couldn't resolve this issue using the available troubleshooting information. I'll create an IT support incident with the details from our conversation so the support team can investigate it."
 )
 
 # This classifier is deliberately conservative: it is only used to select the
@@ -59,8 +59,8 @@ IT_QUERY_TERMS = {
 }
 
 GUIDED_NO_SOLUTION_RESPONSE = (
-    "I couldn't fully resolve your issue using the available knowledge base.\n\n"
-    "Please click 'File Ticket' in the sidebar to raise this issue to the IT support team."
+    "I couldn't resolve this issue using the available troubleshooting information. "
+    "I'll create an IT support incident with the details from our conversation so the support team can investigate it."
 )
 
 GREETING_PHRASES = {
@@ -106,6 +106,30 @@ def _greeting_prompt(query: str) -> BuiltPrompt:
         context_used=context,
         metadata={"query_type": "GREETING"},
     )
+
+
+def has_sufficient_retrieval_context(retrieved_context: RetrievedContext, query: str | None = None) -> bool:
+    """Return True only when retrieved KB evidence is strong enough to ground an answer."""
+    if not retrieved_context or not retrieved_context.search_results:
+        return False
+
+    query_terms = set(re.findall(r"[a-z0-9]+", (query or "").lower())) if query else set()
+
+    for result in retrieved_context.search_results:
+        metadata = result.metadata or {}
+        score = float(metadata.get("relevance_score", metadata.get("hybrid_score", metadata.get("similarity_score", 0.0)) or 0.0))
+        valid = bool(metadata.get("relevance_valid", score >= 0.35))
+        if not valid:
+            continue
+        if score < 0.35:
+            continue
+
+        chunk_text = (result.chunk.text or result.chunk.chunk_text or "").lower()
+        if query_terms and not any(term in chunk_text for term in query_terms):
+            continue
+        return True
+
+    return False
 
 
 DEFAULT_TROUBLESHOOTING_FAILURE_THRESHOLD = int(os.getenv("TROUBLESHOOTING_FAILURE_THRESHOLD", "3"))
@@ -537,6 +561,50 @@ async def _ensure_ai_resolved_ticket(
     if conversation and conversation.get("ticket_id"):
         existing_ticket = await db["tickets"].find_one({"_id": conversation["ticket_id"]})
         if existing_ticket:
+            # If this is a continuation (new messages after resolution), append
+            # the new issue details to the existing ticket instead of returning
+            # the same ticket unchanged.
+            history_records = await db["chat_history"].find({"session_id": session_id}).sort("created_at").to_list(length=None)
+            # Check if there are new user messages after the resolution
+            user_msgs = [r.get("message", "") for r in history_records if r.get("role") == "user"]
+            if len(user_msgs) > 1:
+                # Build appendix from latest issue
+                new_issue_text = "\n\n---\n\n**Additional issue (same session):**\n\n"
+                latest_user_msgs = user_msgs[-2:]  # last 2 user messages
+                latest_assistant = [r.get("message", "") for r in reversed(history_records) if r.get("role") == "assistant"][:2]
+                for um, am in zip(latest_user_msgs, reversed(latest_assistant)):
+                    new_issue_text += f"**User:** {um}\n\n**Agent:** {am}\n\n"
+                old_desc = existing_ticket.get("description", "")
+                # Append new issue title with " + " separator (avoid duplicates)
+                old_title = existing_ticket.get("title", "")
+                update_fields: dict = {
+                    "description": old_desc + new_issue_text,
+                    "updated_at": datetime.utcnow(),
+                }
+                # Extract title from latest user message for appending
+                latest_user_msg = user_msgs[-1] if user_msgs else ""
+                if latest_user_msg:
+                    new_title_part = latest_user_msg.strip()[:255]
+                    if new_title_part.lower() not in old_title.lower():
+                        update_fields["title"] = f"{old_title} + {new_title_part}"
+                await db["tickets"].update_one(
+                    {"_id": existing_ticket["_id"]},
+                    {"$set": update_fields},
+                )
+                # Link new chat history records to existing ticket
+                for row in history_records:
+                    metadata = {}
+                    if row.get("metadata_json"):
+                        try:
+                            metadata = json.loads(row["metadata_json"])
+                        except (TypeError, json.JSONDecodeError):
+                            metadata = {}
+                    if not metadata.get("ticket_id"):
+                        metadata["ticket_id"] = existing_ticket["_id"]
+                        await db["chat_history"].update_one(
+                            {"_id": row["_id"]},
+                            {"$set": {"metadata_json": json.dumps(metadata)}},
+                        )
             return await get_ticket(
                 db, existing_ticket["_id"], {"id": current_user.get("id"), "internal_role": "admin"}
             )
@@ -1009,6 +1077,11 @@ async def chat(
 
     tracker = _get_or_create_tracker(session_id)
 
+    # When continuing in the same chat after issue resolution, reset the
+    # satisfaction tracker so the satisfaction card can appear for the next issue.
+    if payload.reset_satisfaction:
+        tracker.satisfaction_prompt_shown = False
+
     conversation_state, conversation_metadata = await _get_conversation_state(db, session_id)
     conversation_state, conversation_metadata = _update_conversation_metadata(
         conversation_state,
@@ -1294,12 +1367,13 @@ async def chat(
             guided_phase = "TROUBLESHOOTING"
             guided_state = "TROUBLESHOOTING"
 
+    retrieval_confident = has_sufficient_retrieval_context(retrieved_context, payload.query)
     if guided_question:
         answer = guided_question
         guided_actions = []
         kb_hit = True
         confidence = confidence or 1.0
-    elif kb_hit:
+    elif kb_hit and retrieval_confident:
         prompt_builder = PromptBuilderFactory.create("rag")
         built_prompt = prompt_builder.build(
             query=payload.query,
@@ -1327,6 +1401,7 @@ async def chat(
         guided_state = "NO_SOLUTION"
         guided_phase = "KB_EXHAUSTED"
         guided_actions = []
+        kb_hit = False
 
     if kb_hit and not guided_question and "Did this fix your issue?" not in answer:
         answer = f"{answer.rstrip()}\n\nDid this fix your issue?"
@@ -1334,6 +1409,12 @@ async def chat(
             "Chat response source=No KB Match query_type=%s kb_hit=false threshold=%s documents=0",
             response_query_type,
             retrieval_threshold,
+        )
+
+    if not kb_hit and not guided_question and it_related_query:
+        logger.info(
+            "Grounded response blocked: insufficient retrieval confidence for query=%r; using existing safe fallback.",
+            payload.query,
         )
 
     # Record the assistant response and set likely_resolution_provided when:
@@ -1618,17 +1699,75 @@ async def escalate_to_ticket(
     """Escalate a chat session to a support ticket."""
     settings = get_settings()
 
-    existing_record = await db["ai_conversations"].find_one({"conversation_id": payload.session_id})
-    if existing_record and existing_record.get("ticket_id"):
-        existing_ticket = await db["tickets"].find_one({"_id": existing_record["ticket_id"]})
+    # Smart ticket grouping: if an existing ticket ID is provided and the source
+    # matches, append the new issue to that ticket instead of creating a new one.
+    if payload.existing_ticket_id and payload.source:
+        existing_ticket = await db["tickets"].find_one({"_id": payload.existing_ticket_id})
         if existing_ticket:
-            return await create_ticket(db, TicketCreate(
-                title=existing_ticket.get("title", "Support Request"),
-                description=existing_ticket.get("description", ""),
-                category=existing_ticket.get("category", "General"),
-                priority=TicketPriority(existing_ticket.get("priority", "medium").lower()),
-                ai_summary=existing_ticket.get("ai_summary"),
-            ), reason="Escalated from chat", current_user=current_user)
+            existing_source = "AI_RESOLVED" if existing_ticket.get("resolution_source") == "AI" else "FILE_INCIDENT"
+            if existing_source == payload.source:
+                # Same source → append to existing ticket
+                chat_history_records_cursor = db["chat_history"].find({"session_id": payload.session_id}).sort("created_at")
+                chat_history_records = await chat_history_records_cursor.to_list(length=None)
+                if chat_history_records:
+                    # Build description appendix from new conversation
+                    user_msgs = [r.get("message", "") for r in chat_history_records if r.get("role") == "user"]
+                    assistant_msgs = [r.get("message", "") for r in chat_history_records if r.get("role") == "assistant"]
+                    new_issue_text = "\n\n---\n\n**Continued conversation:**\n\n"
+                    for um, am in zip(user_msgs[-3:], assistant_msgs[-3:]):
+                        new_issue_text += f"**User:** {um}\n\n**Agent:** {am}\n\n"
+                    if len(user_msgs) > 3:
+                        new_issue_text = f"*({len(user_msgs) - 3} earlier messages omitted)*\n\n" + new_issue_text
+
+                    # Get existing description
+                    old_desc = existing_ticket.get("description", "")
+                    new_desc = old_desc + new_issue_text
+
+                    # Append new issue title with " + " separator (avoid duplicates)
+                    old_title = existing_ticket.get("title", "")
+                    update_fields: dict = {
+                        "description": new_desc,
+                        "updated_at": datetime.utcnow(),
+                    }
+                    if payload.new_issue_title and payload.new_issue_title.strip():
+                        new_title_part = payload.new_issue_title.strip()
+                        if new_title_part.lower() not in old_title.lower():
+                            update_fields["title"] = f"{old_title} + {new_title_part}"
+
+                    # Update the ticket
+                    await db["tickets"].update_one(
+                        {"_id": existing_ticket["_id"]},
+                        {"$set": update_fields},
+                    )
+
+                    # Link chat history records to existing ticket
+                    for hist_msg in chat_history_records:
+                        metadata = {}
+                        if hist_msg.get("metadata_json"):
+                            try:
+                                metadata = json.loads(hist_msg["metadata_json"])
+                            except json.JSONDecodeError:
+                                metadata = {}
+                        metadata["ticket_id"] = existing_ticket["_id"]
+                        await db["chat_history"].update_one(
+                            {"_id": hist_msg["_id"]},
+                            {"$set": {"metadata_json": json.dumps(metadata)}}
+                        )
+
+                    # Update conversation record
+                    await _upsert_ai_conversation_record(
+                        db,
+                        payload.session_id,
+                        current_user.get("id"),
+                        "ESCALATED",
+                        ticket_id=existing_ticket["_id"],
+                        escalated=True,
+                        resolved_by_ai=False,
+                    )
+
+                    return await get_ticket(
+                        db, existing_ticket["_id"], {"id": current_user.get("id"), "internal_role": "admin"}
+                    )
 
     # Get all chat history for the session
     chat_history_records_cursor = db["chat_history"].find({"session_id": payload.session_id}).sort("created_at")

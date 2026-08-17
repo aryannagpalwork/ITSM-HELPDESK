@@ -78,6 +78,20 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
         IndexModel([("status", ASCENDING)]),
         IndexModel([("category", ASCENDING)]),
         IndexModel([("assigned_to", ASCENDING), ("status", ASCENDING)]),
+        # Duplicate detection: partial unique index prevents same employee from
+        # creating two active tickets with identical content.  The partial filter
+        # ensures "Create Anyway" tickets (fingerprint=null) and resolved/closed
+        # tickets are not constrained by this index.
+        IndexModel(
+            [("created_by", ASCENDING), ("duplicate_fingerprint", ASCENDING)],
+            unique=True,
+            partialFilterExpression={
+                "duplicate_fingerprint": {"$type": "string"},
+                "status": {"$in": ["Open", "In Progress", "Waiting for User Response"]},
+            },
+        ),
+        # Duplicate detection: efficient lookup by employee + status for similarity scan
+        IndexModel([("created_by", ASCENDING), ("status", ASCENDING), ("created_at", ASCENDING)]),
     ])
     await db.alerts.create_indexes([
         IndexModel([("status", ASCENDING)]),

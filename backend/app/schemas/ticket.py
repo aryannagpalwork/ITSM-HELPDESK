@@ -86,6 +86,11 @@ class TicketCreate(BaseModel):
     sla_breached: bool | None = None
     resolution_duration_hours: float | None = None
     sla_compliant: bool | None = None
+    # Duplicate detection fields
+    duplicate_of_ticket_id: str | None = None
+    duplicate_status: str | None = None
+    duplicate_similarity_score: float | None = None
+    duplicate_fingerprint: str | None = None
 
     @field_validator("priority", mode="before")
     @classmethod

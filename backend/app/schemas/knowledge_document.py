@@ -66,6 +66,7 @@ class ChatRequest(ORMBase):
     similarity_threshold: float = 0.0
     chat_history: list[ChatMessageInput] = []
     session_id: str | None = None
+    reset_satisfaction: bool | None = None  # when true, reset satisfaction_prompt_shown for new issue in same session
 
 
 class RetrievedDocumentSource(ORMBase):
@@ -151,6 +152,9 @@ class ChatResponse(ORMBase):
 class EscalateToTicketRequest(ORMBase):
     session_id: str
     user_feedback: str | None = None
+    source: str | None = None          # "AI_RESOLVED" or "FILE_INCIDENT"
+    existing_ticket_id: str | None = None  # append to this ticket if source matches
+    new_issue_title: str | None = None  # title of new issue to append with " + " separator
 
 
 class GeneratedTicketDetails(ORMBase):

@@ -138,8 +138,10 @@ body {
 .hover-surface:hover { background-color: var(--sidebar-hover); }
 .hover-text:hover { color: var(--text-primary); }
 .hover-border:hover { border-color: var(--border-strong); }
-.accent-btn { background-color: var(--accent-primary); color: var(--accent-primary-contrast); }
+.accent-btn { background-color: var(--accent-primary); color: var(--accent-primary-contrast); cursor: pointer; transition: all 0.15s ease; }
 .accent-btn:hover { background-color: var(--accent-primary-hover); }
+.accent-btn:active { transform: scale(0.97); }
+.accent-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
 /* Reusable form field — background/border/text/placeholder + accent focus.
  * Removes the need to repeat input token classes across every form. */

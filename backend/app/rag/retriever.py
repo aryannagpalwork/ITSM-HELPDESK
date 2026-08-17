@@ -336,12 +336,14 @@ class Reranker(ABC):
         self,
         query: str,
         search_results: list[VectorSearchResult],
+        min_score: Optional[float] = None,
     ) -> list[VectorSearchResult]:
         """Rerank search results based on relevance.
         
         Args:
             query: Original user query.
             search_results: Initial search results to rerank.
+            min_score: Minimum relevance score required to keep a result.
             
         Returns:
             Reranked list of VectorSearchResult objects.
@@ -350,6 +352,71 @@ class Reranker(ABC):
             RerankingError: If reranking fails.
         """
         pass
+
+
+class HybridReranker(Reranker):
+    """Score and filter retrieved chunks against the user query before context assembly."""
+
+    def __init__(self, min_score: float = 0.55, similarity_weight: float = 0.65, keyword_weight: float = 0.35):
+        self.min_score = float(min_score)
+        self.similarity_weight = float(similarity_weight)
+        self.keyword_weight = float(keyword_weight)
+
+    def _keyword_overlap(self, query: str, chunk_text: str) -> float:
+        query_terms = set(_tokenize(normalize_query(query)))
+        if not query_terms:
+            return 0.0
+
+        chunk_terms = Counter(_tokenize(chunk_text))
+        overlap = sum(1 for term in query_terms if chunk_terms.get(term, 0) > 0)
+        return overlap / max(1, len(query_terms))
+
+    def rerank(
+        self,
+        query: str,
+        search_results: list[VectorSearchResult],
+        min_score: Optional[float] = None,
+    ) -> list[VectorSearchResult]:
+        if not search_results:
+            return []
+
+        threshold = float(min_score) if min_score is not None else self.min_score
+        reranked: list[VectorSearchResult] = []
+
+        for result in search_results:
+            chunk_text = result.chunk.text or result.chunk.chunk_text or ""
+            similarity_score = float(result.similarity_score or 0.0)
+            keyword_score = self._keyword_overlap(query, chunk_text)
+            relevance_score = (self.similarity_weight * similarity_score) + (self.keyword_weight * keyword_score)
+
+            metadata = dict(result.metadata or {})
+            metadata.update({
+                "keyword_score": keyword_score,
+                "similarity_score": similarity_score,
+                "hybrid_score": relevance_score,
+                "relevance_score": relevance_score,
+                "relevance_valid": relevance_score >= threshold,
+            })
+
+            reranked.append(
+                VectorSearchResult(
+                    chunk=result.chunk,
+                    similarity_score=similarity_score,
+                    rank=result.rank,
+                    metadata=metadata,
+                )
+            )
+
+        reranked.sort(
+            key=lambda item: (
+                float((item.metadata or {}).get("relevance_score", 0.0)),
+                float(item.similarity_score or 0.0),
+                float((item.metadata or {}).get("keyword_score", 0.0)),
+            ),
+            reverse=True,
+        )
+
+        return [item for item in reranked if float((item.metadata or {}).get("relevance_score", 0.0)) >= threshold]
 
 
 class RerankingError(Exception):
@@ -456,16 +523,17 @@ class FAISSRetriever(Retriever):
 
         ranked = rank_hybrid_results(query, list(merged.values()))
         ranked = _deduplicate_ranked_results(ranked)
-        filtered = [item for item in ranked if validate_relevance(item, threshold=effective_config.relevance_threshold)]
-        results = [
+        rerank_candidates = [
             VectorSearchResult(
                 chunk=item["chunk"],
                 similarity_score=float(item["similarity_score"]),
                 rank=item["rank"],
                 metadata={**(item.get("metadata") or {}), "keyword_score": item["keyword_score"], "hybrid_score": item["hybrid_score"], "relevance_valid": True},
             )
-            for item in filtered[: effective_config.top_k]
+            for item in ranked
         ]
+        reranked = HybridReranker(min_score=effective_config.relevance_threshold).rerank(query, rerank_candidates)
+        results = reranked[: effective_config.top_k]
 
         total_ms = round((time.perf_counter() - retrieve_start) * 1000, 2)
 
@@ -541,16 +609,17 @@ class FAISSRetriever(Retriever):
 
         ranked = rank_hybrid_results("", merged_candidates)
         ranked = _deduplicate_ranked_results(ranked)
-        filtered = [item for item in ranked if validate_relevance(item, threshold=effective_config.relevance_threshold)]
-        results = [
+        rerank_candidates = [
             VectorSearchResult(
                 chunk=item["chunk"],
                 similarity_score=float(item["similarity_score"]),
                 rank=item["rank"],
                 metadata={**(item.get("metadata") or {}), "keyword_score": item["keyword_score"], "hybrid_score": item["hybrid_score"], "relevance_valid": True},
             )
-            for item in filtered[: effective_config.top_k]
+            for item in ranked
         ]
+        reranked = HybridReranker(min_score=effective_config.relevance_threshold).rerank(" ".join(str(v) for v in query_embedding), rerank_candidates)
+        results = reranked[: effective_config.top_k]
 
         return RetrievedContext(
             chunks=[result.chunk for result in results],

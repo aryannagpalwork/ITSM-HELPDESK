@@ -1,6 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useApp } from '../shared/AppContext';
+import { checkDuplicateTicket } from '../shared/api';
+import { DuplicateWarningModal, DuplicateWarning } from '../shared/DuplicateWarningModal';
 import { TicketPriority, TicketStatus } from '../shared/types';
 import { 
   Search, 
@@ -70,6 +72,10 @@ export const TicketDashboard: React.FC = () => {
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
   const [priority, setPriority] = useState<TicketPriority>('medium');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const [duplicateWarning, setDuplicateWarning] = useState<DuplicateWarning | null>(null);
+  const [ticketError, setTicketError] = useState<string | null>(null);
 
   useEffect(() => {
     loadTickets({
@@ -159,20 +165,85 @@ export const TicketDashboard: React.FC = () => {
 
   const handleCreateTicket = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !desc.trim()) return;
+    if (!title.trim() || !desc.trim() || submittingRef.current) return;
 
-    await createTicket({
-      title,
-      description: desc,
-      priority,
-      aiSummary: `AI Summary: Support incident created manually from ticket workspace. Title: "${title}". Initial Severity Level predicted: ${priority.toUpperCase()}. Escalated automatically to IT dispatch.`,
-      suggestedResolution: `Predicted Resolution SOP: 1. Fetch relevant diagnostic logs. 2. Verify account status on identity controller. 3. Resolve incident using typical Level-1 support procedures.`
-    });
+    const trimmedTitle = title.trim();
+    const trimmedDescription = desc.trim();
+    submittingRef.current = true;
+    setIsSubmitting(true);
+    setTicketError(null);
 
-    setTitle('');
-    setDesc('');
-    setPriority('medium');
-    setIsOpen(false);
+    try {
+      const possibleDuplicate = await checkDuplicateTicket({
+        title: trimmedTitle,
+        description: trimmedDescription,
+      });
+
+      if (possibleDuplicate.status === 'exact' || possibleDuplicate.status === 'possible') {
+        setDuplicateWarning(possibleDuplicate);
+        submittingRef.current = false;
+        setIsSubmitting(false);
+        return;
+      }
+
+      await createTicket({
+        title: trimmedTitle,
+        description: trimmedDescription,
+        priority,
+        aiSummary: `AI Summary: Support incident created manually from ticket workspace. Title: "${trimmedTitle}". Initial Severity Level predicted: ${priority.toUpperCase()}. Escalated automatically to IT dispatch.`,
+        suggestedResolution: `Predicted Resolution SOP: 1. Fetch relevant diagnostic logs. 2. Verify account status on identity controller. 3. Resolve incident using typical Level-1 support procedures.`
+      });
+
+      setTitle('');
+      setDesc('');
+      setPriority('medium');
+      setIsOpen(false);
+    } catch (error) {
+      console.error('Ticket creation failed:', error);
+      setTicketError('Unable to verify duplicates. Please try again or contact support.');
+    } finally {
+      submittingRef.current = false;
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCreateAnyway = async () => {
+    if (submittingRef.current) return;
+    const trimmedTitle = title.trim();
+    const trimmedDescription = desc.trim();
+    submittingRef.current = true;
+    setDuplicateWarning(null);
+    setIsSubmitting(true);
+    setTicketError(null);
+
+    try {
+      await createTicket(
+        {
+          title: trimmedTitle,
+          description: trimmedDescription,
+          priority,
+          aiSummary: `AI Summary: Support incident created manually from ticket workspace. Title: "${trimmedTitle}". Initial Severity Level predicted: ${priority.toUpperCase()}. Escalated automatically to IT dispatch.`,
+          suggestedResolution: `Predicted Resolution SOP: 1. Fetch relevant diagnostic logs. 2. Verify account status on identity controller. 3. Resolve incident using typical Level-1 support procedures.`
+        },
+        undefined,
+        duplicateWarning ? {
+          duplicateOfTicketId: duplicateWarning.ticket?.id,
+          duplicateStatus: duplicateWarning.status,
+          duplicateSimilarityScore: duplicateWarning.similarity_score,
+        } : undefined,
+      );
+
+      setTitle('');
+      setDesc('');
+      setPriority('medium');
+      setIsOpen(false);
+    } catch (error) {
+      console.error('Ticket creation failed:', error);
+      setTicketError('Failed to create ticket. Please try again.');
+    } finally {
+      submittingRef.current = false;
+      setIsSubmitting(false);
+    }
   };
 
   const getPriorityStyle = (prio: TicketPriority) => {
@@ -211,7 +282,7 @@ export const TicketDashboard: React.FC = () => {
         </div>
 
         <button
-          onClick={() => setIsOpen(true)}
+          onClick={() => { setIsOpen(true); setTicketError(null); }}
           className="px-4 py-2 accent-btn rounded-lg text-xs font-semibold flex items-center justify-center space-x-2 transition-all shadow-lg cursor-pointer self-start sm:self-center"
         >
           <Plus className="w-3.5 h-3.5" />
@@ -254,7 +325,7 @@ export const TicketDashboard: React.FC = () => {
   <option value="waiting_for_user_response" className="bg-card-solid text-secondary">Waiting for User Response</option>
   <option value="resolved" className="bg-card-solid text-secondary">Resolved</option>
   <option value="closed" className="bg-card-solid text-secondary">Closed</option>
-              <option value="resolved_ai" className="bg-card-solid text-secondary">Resolved by AI</option>
+              {(currentUser.role === 'Administrator' || currentUser.role === 'Agent') && <option value="resolved_ai" className="bg-card-solid text-secondary">Resolved by AI</option>}
             </select>
           </div>
 
@@ -436,10 +507,11 @@ export const TicketDashboard: React.FC = () => {
                   id="new-ticket-title"
                   name="title"
                   type="text" 
+                  spellCheck={false}
                   placeholder="e.g. Corporate Wi-Fi connection issues on Windows laptop"
                   required
                   value={title}
-                  onChange={(e) => setTitle(e.target.value)}
+                  onChange={(e) => { setTitle(e.target.value); setTicketError(null); }}
                   className="w-full input-token rounded-lg px-3 py-2 text-xs outline-none"
                 />
               </div>
@@ -449,11 +521,12 @@ export const TicketDashboard: React.FC = () => {
                 <textarea 
                   id="new-ticket-description"
                   name="description"
+                  spellCheck={false}
                   placeholder="Provide details about error prompts, software versions, and what troubleshooting steps you have already attempted..."
                   rows={4}
                   required
                   value={desc}
-                  onChange={(e) => setDesc(e.target.value)}
+                  onChange={(e) => { setDesc(e.target.value); setTicketError(null); }}
                   className="w-full input-token rounded-lg px-3 py-2 text-xs outline-none resize-none"
                 />
               </div>
@@ -478,24 +551,42 @@ export const TicketDashboard: React.FC = () => {
                 </div>
               </div>
 
+              {ticketError && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                  <AlertCircle className="w-3.5 h-3.5 text-red-400 mt-0.5 shrink-0" />
+                  <p className="text-[11px] text-red-400">{ticketError}</p>
+                </div>
+              )}
+
               <div className="flex items-center justify-end space-x-3 pt-4 border-t border-token">
                 <button
                   type="button"
                   onClick={() => setIsOpen(false)}
-                  className="px-4 py-2 rounded-lg text-xs font-semibold text-secondary hover-text bg-card border border-token cursor-pointer"
+                  disabled={isSubmitting}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold text-secondary hover-text bg-card border border-token cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-lg text-xs font-semibold accent-btn cursor-pointer shadow-md"
+                  disabled={isSubmitting}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold accent-btn cursor-pointer shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Create Ticket
+                  {isSubmitting ? 'Creating Ticket...' : 'Create Ticket'}
                 </button>
               </div>
             </form>
           </div>
         </div>
+      )}
+
+      {duplicateWarning && (
+        <DuplicateWarningModal
+          warning={duplicateWarning}
+          onDismiss={() => setDuplicateWarning(null)}
+          onCreateAnyway={handleCreateAnyway}
+          isSubmitting={isSubmitting}
+        />
       )}
 
     </div>
