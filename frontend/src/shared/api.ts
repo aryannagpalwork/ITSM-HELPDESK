@@ -22,22 +22,12 @@ import {
 // Use the browser's host by default so the UI also works when opened through
 // localhost, a LAN address, or another development hostname. Set
 // VITE_API_BASE_URL when the API is hosted separately.
-const browserHost = window.location.hostname || '127.0.0.1';
-// Windows browsers may resolve `localhost` to IPv6 (::1), while the local
-// Uvicorn server is bound to IPv4. Use the explicit loopback IPv4 address so
-// local API requests do not hang with a browser-level "Failed to fetch".
-const apiHost = browserHost === 'localhost' || browserHost === '::1' || browserHost === '[::1]'
-  ? '127.0.0.1'
-  : browserHost;
-const configuredApiBase = import.meta.env.VITE_API_BASE_URL as string | undefined;
-const primaryApiBase = configuredApiBase
-  ? configuredApiBase.replace(/(https?:\/\/)(localhost|127\.0\.0\.1|\[::1\]|::1)(?=[:/]|$)/i, (_match, protocol: string) => `${protocol}127.0.0.1`)
-  : `${window.location.protocol}//${apiHost}:8000`;
-const fallbackApiBase = primaryApiBase.includes('127.0.0.1')
-  ? primaryApiBase.replace('127.0.0.1', 'localhost')
-  : primaryApiBase.replace('localhost', '127.0.0.1');
-const API_BASE_URL = primaryApiBase;
-const API_BASE_URL_FALLBACKS = [primaryApiBase, fallbackApiBase].filter((value, index, array) => value && array.indexOf(value) === index);
+const configuredApiBase = import.meta.env.VITE_API_BASE_URL?.trim();
+
+const API_BASE_URL = configuredApiBase || 'http://127.0.0.1:8000';
+
+const API_BASE_URL_FALLBACKS = [API_BASE_URL];
+
 const ACCESS_TOKEN_KEY = 'it_copilot_access_token';
 const REFRESH_TOKEN_KEY = 'it_copilot_refresh_token';
 
