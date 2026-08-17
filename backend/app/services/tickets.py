@@ -582,6 +582,7 @@ async def _write_audit(
     new_value: any = None,
     changes: list[dict] | None = None,
     reason: str | None = None,
+    created_at: datetime | None = None,
 ) -> None:
     metadata = {}
     if field:
@@ -592,7 +593,8 @@ async def _write_audit(
         metadata["new_value"] = new_value
     if changes:
         metadata["changes"] = changes
-    
+
+    audit_created_at = created_at or datetime.utcnow()
     audit_log = {
         "_id": str(uuid4()),
         "user_id": user_id,
@@ -601,7 +603,7 @@ async def _write_audit(
         "entity_id": ticket_id,
         "metadata_json": json.dumps(metadata) if metadata else None,
         "reason": reason,
-        "created_at": datetime.utcnow(),
+        "created_at": audit_created_at,
     }
     await db.audit_logs.insert_one(audit_log)
 
@@ -908,7 +910,13 @@ async def _serialize_ticket(ticket: dict, db: AsyncIOMotorDatabase) -> TicketRea
 
 
 
-async def create_ticket(db: AsyncIOMotorDatabase, payload: TicketCreate, reason: str | None = None, current_user: dict | None = None) -> TicketRead:
+async def create_ticket(
+    db: AsyncIOMotorDatabase,
+    payload: TicketCreate,
+    reason: str | None = None,
+    current_user: dict | None = None,
+    assignment_time_override: datetime | None = None,
+) -> TicketRead:
     created_by_id = current_user["id"] if current_user else payload.created_by
     ticket_id = str(uuid4())
     
@@ -978,9 +986,9 @@ async def create_ticket(db: AsyncIOMotorDatabase, payload: TicketCreate, reason:
     # for API compatibility but intentionally cannot bypass routing.
     selected = await _select_agent(db, ticket)
     attempted = set()
+    assignment_time = assignment_time_override or datetime.utcnow()
     while selected and selected["_id"] not in attempted:
         attempted.add(selected["_id"])
-        assignment_time = datetime.utcnow()
         if ticket["status"] not in ACTIVE_TICKET_STATUSES or await _reserve_agent(db, selected["_id"], assignment_time):
             ticket["assigned_to"] = selected["_id"]
             ticket["assigned_at"] = assignment_time
@@ -1017,9 +1025,10 @@ async def create_ticket(db: AsyncIOMotorDatabase, payload: TicketCreate, reason:
                 ticket["assigned_to"] = None
         else:
             await _adjust_agent_workload(db, ticket["assigned_to"], assigned_delta=1)
+        audit_reason = None if (payload.ai_resolved or str(payload.resolution_source or "").lower() == "ai" or str(reason or "").lower() == "resolved by ai") else reason
         await _write_audit(
             db, action="ticket.assigned", user_id=None, ticket_id=ticket_id,
-            old_value=None, new_value=ticket["assigned_to"], reason=reason,
+            old_value=None, new_value=ticket["assigned_to"], reason=audit_reason,
             changes=[
                 {"field": "Assignment Type", "old_value": None, "new_value": "Automatic"},
                 {"field": "Assignment Reason", "old_value": None, "new_value": ticket["assignment_reason"]},
@@ -1027,7 +1036,8 @@ async def create_ticket(db: AsyncIOMotorDatabase, payload: TicketCreate, reason:
                 {"field": "Previous Agent", "old_value": None, "new_value": None},
                 {"field": "New Agent", "old_value": None, "new_value": ticket["assigned_to"]},
                 {"field": "Assigned By", "old_value": None, "new_value": "System"},
-            ]
+            ],
+            created_at=assignment_time,
         )
         assigned_agent = await db.users.find_one({"_id": ticket["assigned_to"]})
         if assigned_agent:
