@@ -126,44 +126,142 @@ class RecursiveCharacterTextSplitter(Chunker):
     def chunk(self, text: str, metadata: DocumentMetadata) -> list[DocumentChunk]:
         chunks_text = self._split_text(text)
         document_chunks = []
+        cursor = 0
         for i, chunk_text in enumerate(chunks_text):
+            start_idx, end_idx, cursor = self._locate_chunk(text, chunk_text, cursor)
             chunk = DocumentChunk(
                 chunk_id=str(uuid.uuid4()),
                 text=chunk_text,
                 chunk_text=chunk_text,
                 metadata=metadata,
                 chunk_number=i + 1,
-                start_index=text.find(chunk_text) if chunk_text in text else 0,
-                end_index=text.find(chunk_text) + len(chunk_text) if chunk_text in text else len(chunk_text),
+                start_index=start_idx,
+                end_index=end_idx,
             )
             document_chunks.append(chunk)
         return document_chunks
-    
+
     def chunk_extracted(
         self, extracted_text: ExtractedText, metadata: DocumentMetadata
     ) -> list[DocumentChunk]:
-        # First, split the text
-        base_chunks = self.chunk(extracted_text.text, metadata)
-        
-        # Now add structural info (headings, sections)
-        enhanced_chunks = []
-        for chunk_idx, chunk in enumerate(base_chunks):
-            # Find which heading/section this chunk belongs to
-            current_heading = None
-            # Simple approach: find last heading before chunk starts
-            if extracted_text.headings:
-                chunk_text_lower = chunk.text.lower()
-                for heading in extracted_text.headings:
-                    if heading.lower() in chunk_text_lower:
-                        current_heading = heading
-                        break
-            
-            chunk.heading = current_heading
-            chunk.section = current_heading or "General"
-            chunk.chunk_number = chunk_idx + 1
-            enhanced_chunks.append(chunk)
-        
+        text = extracted_text.text
+
+        # Locate each heading's real position in the document (instead of
+        # guessing a heading per-chunk via substring search after the fact).
+        located_headings = self._locate_headings(text, extracted_text.headings or [])
+
+        # Split the document into sections BEFORE running the recursive
+        # character splitter. This is the key fix: a short section like
+        # "Contraindications\nNone known." must never be merged with the
+        # next section's content just because it's small. Splitting by
+        # section first guarantees section boundaries are structural, not
+        # incidental to how chunk_size happens to fall.
+        sections = self._split_into_sections(text, located_headings)
+
+        enhanced_chunks: list[DocumentChunk] = []
+        chunk_counter = 0
+        for section in sections:
+            section_text = section["text"]
+            if not section_text.strip():
+                continue
+
+            piece_texts = self._split_text(section_text)
+            cursor = section["start"]
+            for piece in piece_texts:
+                if not piece.strip():
+                    continue
+                start_idx, end_idx, cursor = self._locate_chunk(text, piece, cursor)
+                chunk_counter += 1
+                chunk = DocumentChunk(
+                    chunk_id=str(uuid.uuid4()),
+                    text=piece,
+                    chunk_text=piece,
+                    metadata=metadata,
+                    chunk_number=chunk_counter,
+                    start_index=start_idx,
+                    end_index=end_idx,
+                    heading=section["heading"],
+                    section=section["heading"] or "General",
+                )
+                enhanced_chunks.append(chunk)
+
         return enhanced_chunks
+
+    def _locate_headings(self, text: str, headings: List[str]) -> List[tuple]:
+        """Find each heading's actual position in the document text.
+
+        Headings are matched sequentially (each search starts after the
+        previous match) so that repeated heading titles resolve to distinct
+        occurrences in document order, rather than always pointing at the
+        first occurrence in the whole document.
+        """
+        located = []
+        search_from = 0
+        for heading in headings:
+            if not heading or not heading.strip():
+                continue
+            idx = text.find(heading, search_from)
+            if idx == -1:
+                # Heading text may appear earlier than our cursor (out-of-order
+                # input); fall back to a full-document search rather than
+                # silently dropping the heading.
+                idx = text.find(heading)
+            if idx != -1:
+                located.append((idx, heading))
+                search_from = idx + len(heading)
+        located.sort(key=lambda pair: pair[0])
+        return located
+
+    def _split_into_sections(self, text: str, located_headings: List[tuple]) -> List[dict]:
+        """Split text into contiguous sections at heading positions.
+
+        Each section runs from one heading's start to the next heading's
+        start (or end of document), so a chunk built from a section's text
+        can only ever be labeled with that section's own heading.
+        """
+        if not located_headings:
+            return [{"start": 0, "end": len(text), "heading": None, "text": text}]
+
+        sections = []
+        first_pos = located_headings[0][0]
+        if first_pos > 0:
+            # Preamble text before the first heading (e.g. title page, intro).
+            sections.append({
+                "start": 0,
+                "end": first_pos,
+                "heading": None,
+                "text": text[0:first_pos],
+            })
+
+        for i, (pos, heading) in enumerate(located_headings):
+            end = located_headings[i + 1][0] if i + 1 < len(located_headings) else len(text)
+            sections.append({
+                "start": pos,
+                "end": end,
+                "heading": heading,
+                "text": text[pos:end],
+            })
+
+        return sections
+
+    def _locate_chunk(self, text: str, chunk_text: str, cursor: int) -> tuple:
+        """Find a chunk's start/end index, searching forward from `cursor`.
+
+        Using a moving cursor (instead of a bare text.find(chunk_text)) avoids
+        anchoring every chunk to the FIRST occurrence of its text anywhere in
+        the document, which breaks whenever similar phrasing repeats (common
+        in manuals with repeated warnings/table headers).
+        """
+        idx = text.find(chunk_text, cursor)
+        if idx == -1:
+            idx = text.find(chunk_text)
+        if idx == -1:
+            # Chunk text was transformed (e.g. via overlap-prepending) and no
+            # longer appears verbatim; keep cursor stable rather than
+            # collapsing indices to 0.
+            return cursor, cursor + len(chunk_text), cursor
+        end_idx = idx + len(chunk_text)
+        return idx, end_idx, end_idx
     
     def _split_text(self, text: str) -> List[str]:
         # Recursively split the text using the separators

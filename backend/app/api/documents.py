@@ -138,7 +138,14 @@ async def upload_document(
         tag_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
 
     # Create DB record
-    doc_id = await db["knowledge_documents"].count_documents({}) + 1
+    # IMPORTANT: derive the new ID from the highest existing _id, not the
+    # document COUNT. Using count_documents({}) + 1 means that after any
+    # deletion, the next upload silently reuses a previously-deleted
+    # document's ID (e.g. delete doc #3 from {1,2,3}, next upload also
+    # computes id=3) — which can inherit stale chunk/vector associations
+    # left over from the deleted document if cleanup was ever incomplete.
+    last_doc = await db["knowledge_documents"].find_one(sort=[("_id", -1)])
+    doc_id = (last_doc["_id"] + 1) if last_doc else 1
     doc_title = title or Path(filename).stem
     now = datetime.utcnow().isoformat()
 
@@ -243,17 +250,50 @@ async def delete_document(
             detail="Document not found",
         )
 
-    # Delete file
-    file_location = UPLOAD_DIR / doc["file_path"]
-    if file_location.exists():
-        file_location.unlink()
+    # Delete file if it still exists. Some older records may not have a stored
+    # file_path, and delete operations must not fail on that stale metadata.
+    file_path_value = doc.get("file_path")
+    if file_path_value:
+        file_location = UPLOAD_DIR / str(file_path_value)
+        if file_location.exists():
+            try:
+                file_location.unlink()
+            except OSError:
+                logger.warning(
+                    "Knowledge-base file cleanup failed: document_id=%s path=%s",
+                    document_id,
+                    file_location,
+                )
+        else:
+            logger.warning(
+                "Knowledge-base file already missing during delete: document_id=%s path=%s",
+                document_id,
+                file_location,
+            )
 
-    # Delete from index and DB
-    embedding_service = EmbeddingService(db=db)
-    await embedding_service.delete_document(document_id)
-    embedding_service.save_index()
+    # Delete from index and DB. A missing vector index or stale metadata should
+    # be handled gracefully without leaving the document retrievable.
+    try:
+        embedding_service = EmbeddingService(db=db)
+        await embedding_service.delete_document(document_id)
+        embedding_service.save_index()
+        logger.info("Knowledge-base index cleanup completed: document_id=%s", document_id)
+    except Exception as e:
+        logger.exception("Knowledge-base index cleanup failed: document_id=%s", document_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to remove document from the search index: {str(e)}",
+        ) from e
 
-    await db["knowledge_documents"].delete_one({"_id": document_id})
+    try:
+        await db["knowledge_documents"].delete_one({"_id": document_id})
+        logger.info("Knowledge-base document record deleted: document_id=%s", document_id)
+    except Exception as e:
+        logger.exception("Knowledge-base document record deletion failed: document_id=%s", document_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Document was removed from the search index but the database record could not be deleted: {str(e)}",
+        ) from e
 
 
 @router.get("/{document_id}/download")
