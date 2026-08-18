@@ -310,8 +310,15 @@ def _guided_decision(
                     "You are a guided IT troubleshooting intake assistant. Use only the supplied Knowledge Base text. "
                     "Identify the likely issue type and decide whether one more diagnostic detail is required before giving steps. "
                     "Ask at most one concise, high-value question. Never ask a question already asked. "
+                    "Before setting ready=true, check whether the Knowledge Base context flags any specific "
+                    "diagnostic step as the fastest, most useful, or highest-priority way to narrow down this "
+                    "type of issue (for example, a step described as 'the fastest way to narrow the issue' or "
+                    "listed first in a numbered diagnostic sequence). If such a step exists and the user hasn't "
+                    "addressed it yet, you must ask about it before setting ready=true, even if you believe you "
+                    "already have enough information to give a generic answer. "
                     "Return ONLY JSON: {\"issue_type\": string, \"ready\": boolean, \"question\": string}. "
-                    "Set ready=true when the conversation contains enough detail to provide KB-grounded steps."
+                    "Set ready=true only when the conversation contains enough detail AND all KB-flagged "
+                    "priority diagnostic steps for this issue type have been asked about."
                 ),
             ),
             ChatMessage(
@@ -1144,6 +1151,23 @@ async def chat(
     guided_phase = str(guided_metadata.get("phase") or "DIAGNOSIS")
     original_issue = str(guided_metadata.get("original_issue") or payload.query)
 
+    # Fix 1: only anchor to original_issue when a REAL guided diagnostic
+    # exchange has happened -- not merely when guided_phase says
+    # TROUBLESHOOTING. guided_phase flips to TROUBLESHOOTING as soon as
+    # _guided_decision() returns ready=true, which happens on the very
+    # first KB hit whenever there's nothing to diagnose (e.g. a plain
+    # factual question like "what is philips cardiography" -- there's no
+    # "issue", so the model correctly says ready=true immediately). That
+    # means guided_phase alone can't distinguish a genuine multi-turn
+    # troubleshooting session (printer case: several rounds of connection
+    # type -> model number -> symptom -> sleep mode/cable) from a one-shot
+    # FAQ answer that happened to pass through the same phase. Whether
+    # diagnostic_answers is non-empty is the real signal: it's only
+    # populated when the system actually asked a clarifying question
+    # (line ~1371) AND the user replied to it (line ~1350).
+    troubleshooting_flow_active = bool(guided_metadata.get("diagnostic_answers"))
+    retrieval_topic_anchor = original_issue if troubleshooting_flow_active else ""
+
     # Retrieval-specific query -- kept SHORT and signal-dense on purpose.
     # Embedding search degrades as query text grows: retriever.py's
     # keyword-overlap score divides matches by the TOTAL DISTINCT TERM
@@ -1172,14 +1196,44 @@ async def chat(
     ASSISTANT_SNIPPET_CHARS = 150
     TOTAL_RECENT_TEXT_CHARS = 600
 
+    # Fix 2: a "not found" refusal carries zero retrieval-useful signal --
+    # it's boilerplate, not a KB fact. Folding it forward just re-injects
+    # the previous failure's language into the next query, which can
+    # actively push retrieval further from the real answer (e.g. "does not
+    # contain" / "not documented" phrasing competing for embedding space).
+    REFUSAL_MARKERS = (
+        "does not contain", "doesn't contain", "do not contain",
+        "not contain any specific", "isn't directly detailed",
+        "does not specifically mention", "not documented",
+        "i don't have", "i do not have", "no specific information",
+    )
+
+    def _looks_like_refusal(text: str) -> bool:
+        lowered = (text or "").lower()
+        return any(marker in lowered for marker in REFUSAL_MARKERS)
+
     recent_user_msgs = [m.content for m in chat_history if m.role == MessageRole.USER][-RECENT_USER_TURNS:]
     last_assistant_msgs = [m.content for m in chat_history if m.role == MessageRole.ASSISTANT][-1:]
-    last_assistant_snippet = (last_assistant_msgs[0][:ASSISTANT_SNIPPET_CHARS] if last_assistant_msgs else "")
+    last_assistant_text = last_assistant_msgs[0] if last_assistant_msgs else ""
+    last_assistant_snippet = (
+        "" if _looks_like_refusal(last_assistant_text)
+        else last_assistant_text[:ASSISTANT_SNIPPET_CHARS]
+    )
 
-    recent_turns_parts = recent_user_msgs + ([last_assistant_snippet] if last_assistant_snippet else []) + [payload.query]
-    recent_turns = "\n".join(recent_turns_parts)[-TOTAL_RECENT_TEXT_CHARS:]
+    # Fix 3: put the current query at both ends of the window. The 600-char
+    # budget truncates from the *end*, so a long recent_user_msgs block can
+    # otherwise push the actual current question toward the truncation
+    # boundary. Including it twice guarantees it survives truncation and
+    # gets weighted more heavily in the resulting embedding regardless of
+    # where the cut lands.
+    recent_turns_parts = (
+        [payload.query] + recent_user_msgs
+        + ([last_assistant_snippet] if last_assistant_snippet else [])
+        + [payload.query]
+    )
+    recent_turns = "\n".join(part for part in recent_turns_parts if part)[-TOTAL_RECENT_TEXT_CHARS:]
 
-    retrieval_query_parts = [original_issue]
+    retrieval_query_parts = [retrieval_topic_anchor]
     if diagnostic_answers:
         # Diagnostic answers are short, specific facts (e.g. "printer model:
         # HP LaserJet") -- dense signal, not noise, so these stay.
@@ -1217,21 +1271,31 @@ async def chat(
         retrieved_context = RetrievedContext(chunks=[], search_results=[], total_retrieved=0)
 
     # Do not repeat chunks already used in earlier troubleshooting attempts.
+    # FINAL_CONTEXT_CHUNKS controls how many of the top-20 retrieved candidates
+    # actually reach the LLM. Raised from 5 to 8: with a hybrid scorer and no
+    # diversity/dedup step, a single generic high-scoring chunk (e.g. a short
+    # intro-page blurb that shares keywords with several unrelated questions)
+    # can occupy a top-5 slot across many different queries and crowd out
+    # narrower, more specific chunks that would otherwise answer the question
+    # correctly (e.g. a specific appendix table). Widening the window gives
+    # those specific chunks more room to still make the cut even when they
+    # rank below one or two dominant generic chunks.
+    FINAL_CONTEXT_CHUNKS = 10
     used_chunk_ids = set(guided_metadata.get("kb_articles_used", []) or [])
     if used_chunk_ids:
         filtered_results = [r for r in retrieved_context.search_results if r.chunk.chunk_id not in used_chunk_ids]
         retrieved_context = RetrievedContext(
-            chunks=[r.chunk for r in filtered_results[:5]],
-            search_results=filtered_results[:5],
-            total_retrieved=min(5, len(filtered_results)),
+            chunks=[r.chunk for r in filtered_results[:FINAL_CONTEXT_CHUNKS]],
+            search_results=filtered_results[:FINAL_CONTEXT_CHUNKS],
+            total_retrieved=min(FINAL_CONTEXT_CHUNKS, len(filtered_results)),
             filter_applied=retrieved_context.filter_applied,
             metadata={**retrieved_context.metadata, "candidate_count": len(filtered_results)},
         )
-    elif len(retrieved_context.search_results) > 5:
+    elif len(retrieved_context.search_results) > FINAL_CONTEXT_CHUNKS:
         retrieved_context = RetrievedContext(
-            chunks=[r.chunk for r in retrieved_context.search_results[:5]],
-            search_results=retrieved_context.search_results[:5],
-            total_retrieved=5,
+            chunks=[r.chunk for r in retrieved_context.search_results[:FINAL_CONTEXT_CHUNKS]],
+            search_results=retrieved_context.search_results[:FINAL_CONTEXT_CHUNKS],
+            total_retrieved=FINAL_CONTEXT_CHUNKS,
             filter_applied=retrieved_context.filter_applied,
             metadata={**retrieved_context.metadata, "candidate_count": len(retrieved_context.search_results)},
         )
@@ -1388,6 +1452,18 @@ async def chat(
             "the question, say that the Knowledge Base does not contain the information."
             " Do not repeat any troubleshooting step already present in the previous attempts below."
             f"\nPrevious attempts: {json.dumps(guided_metadata.get('previous_troubleshooting_steps', []))}"
+            "\n\nDo not combine facts from two different Document Chunks into one statement. "
+            "Each Document Chunk is a separate, self-contained piece of context. A specific "
+            "number, duration, or setting (e.g. 'wait 30 seconds') may only be stated if that "
+            "exact number appears in the same Document Chunk as the exact action you are "
+            "describing. Never carry a number, quantity, or setting from one chunk over to a "
+            "different instruction in another chunk, even if they look similar. If no chunk "
+            "specifies a number for the current step, give the instruction without inventing one."
+            "\n\nIf the retrieved context contains a numbered or prioritized diagnostic sequence "
+            "(e.g. 'the fastest way to narrow this down is...', or a numbered list of steps), "
+            "follow that exact order. Do not skip ahead to a later or more generic step (such as "
+            "restarting a device) until the earlier, more specific diagnostic steps from that "
+            "sequence have been offered to the user first."
         )
         llm_service = LLMServiceFactory.create(settings.llm_provider)
         answer, _ = llm_service.generate_response(built_prompt)

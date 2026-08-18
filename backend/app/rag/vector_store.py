@@ -237,10 +237,19 @@ class FAISSVectorStore(VectorStore):
                 if not match:
                     continue
             
-            # Convert L2 distance to similarity
-            # For normalized vectors, L2 distance squared = 2 - 2*cosine
-            # So cosine similarity = 1 - (distance²)/2
-            similarity = 1 - (distances[0][i] ** 2) / 2
+            # Convert L2 distance to similarity.
+            # IMPORTANT: faiss.IndexFlatL2.search() returns the SQUARED L2
+            # distance already (FAISS skips the sqrt since it's unnecessary
+            # for ranking) — so `distances[0][i]` here IS d², not d.
+            # For normalized vectors: d² = 2 - 2*cosine_similarity
+            # So cosine similarity = 1 - d²/2
+            # (Squaring `distances[0][i]` again, as before, silently treated
+            # an already-squared value as if it were raw distance, which
+            # inflated near-perfect matches and crushed moderate-but-real
+            # matches toward zero/negative — pushing them below the
+            # relevance threshold and surfacing as false "not found" results.)
+            similarity = 1 - (distances[0][i]) / 2
+            similarity = max(-1.0, min(1.0, similarity))
             
             results.append(VectorSearchResult(
                 chunk=chunk,
@@ -268,11 +277,11 @@ class FAISSVectorStore(VectorStore):
             return
         
         # Remove chunk from data structures
+        chunk = self._chunks.get(chunk_id)
         del self._chunks[chunk_id]
         del self._id_to_index[chunk_id]
         
         # Remove from document mapping
-        chunk = self._chunks.get(chunk_id)
         if chunk and chunk.document_id in self._doc_to_chunk_ids:
             self._doc_to_chunk_ids[chunk.document_id].remove(chunk_id)
             if not self._doc_to_chunk_ids[chunk.document_id]:
@@ -355,7 +364,7 @@ class FAISSVectorStore(VectorStore):
     def save(self, path: Optional[Path] = None) -> None:
         """Save the vector store to disk."""
         save_path = path or self.storage_path
-        save_path.parent.mkdir(parents=True, exist_ok=True)
+        save_path.mkdir(parents=True, exist_ok=True)
         
         # Save FAISS index
         import faiss
