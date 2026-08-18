@@ -2,6 +2,7 @@ import datetime as dt
 
 import pytest
 
+from app.api.chat import _build_issue_title_from_query, _get_original_query_from_history
 from app.services.kpi import _ticket_resolution_hours, compute_admin_kpis
 
 
@@ -105,3 +106,18 @@ def test_ai_ticket_resolution_hours_uses_first_message_as_start():
     }
 
     assert _ticket_resolution_hours(ticket) == 1.1666666666666667
+
+
+def test_original_query_is_preserved_from_first_user_message():
+    history = [
+        {"role": "user", "message": "I have sent an email to print but I am not receiving any output"},
+        {"role": "assistant", "message": "Is the printer's cloud printing feature enabled?"},
+        {"role": "user", "message": "yes"},
+        {"role": "assistant", "message": "Does the printer have an active internet connection?"},
+        {"role": "user", "message": "yes"},
+    ]
+
+    original_query = _get_original_query_from_history(history, fallback_query="yes")
+    assert original_query == "I have sent an email to print but I am not receiving any output"
+    assert _build_issue_title_from_query(original_query).startswith("IT support needed: ")
+    assert "I have sent an email to print but I am not receiving any output" in _build_issue_title_from_query(original_query)

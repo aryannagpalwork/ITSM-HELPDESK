@@ -64,8 +64,6 @@ export const AIChat: React.FC = () => {
     handleSatisfactionCreateTicket,
     handleChatCreateAnyway,
     dismissChatDuplicateWarning,
-    continueInThisChat,
-    startNewQuery,
     resetThread,
   } = useChat();
 
@@ -597,25 +595,10 @@ export const AIChat: React.FC = () => {
                       : 'Your issue has been resolved by AI.'}
                   </h5>
                 </div>
-                <div className="flex flex-col sm:flex-row gap-2 mt-4">
-                  <button
-                    disabled={isProcessing || isTyping}
-                    className="flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                    style={{
-                      backgroundColor: tokens.accentPrimary,
-                      color: 'var(--accent-primary-contrast)',
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!isProcessing && !isTyping) e.currentTarget.style.opacity = '0.9';
-                    }}
-                    onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
-                    onClick={() => {
-                      continueInThisChat();
-                      conversationEndedRef.current = false;
-                    }}
-                  >
-                    Continue in This Chat
-                  </button>
+                <p className="text-xs mt-3 mb-4" style={{ color: 'var(--text-secondary)' }}>
+                  This conversation has ended. To start a new conversation or ask a different question, please use the <strong>"New Chat"</strong> button at the top.
+                </p>
+                <div className="flex flex-col sm:flex-row gap-2">
                   <button
                     disabled={isProcessing || isTyping}
                     className="flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed border shadow-sm"
@@ -632,11 +615,11 @@ export const AIChat: React.FC = () => {
                     }}
                     onClick={() => {
                       if (isProcessingRef.current) return;
-                      startNewQuery();
+                      resetThread();
                       conversationEndedRef.current = false;
                     }}
                   >
-                    Start a New Conversation
+                    New Chat
                   </button>
                 </div>
               </div>
@@ -754,7 +737,7 @@ export const AIChat: React.FC = () => {
                 className="text-[10px] leading-relaxed"
                 style={{ color: 'var(--text-secondary)' }}
               >
-                Your issue has been handed over to IT Support. Use <strong>Continue in This Chat</strong> to add more context, or <strong>Start a New Conversation</strong> for a different issue.
+                Your issue has been handed over to IT Support. This conversation has ended. To ask a different question or start a new conversation, click the <strong>"New Chat"</strong> button at the top.
               </p>
             </div>
           ) : currentIssueResolved ? (
@@ -773,7 +756,7 @@ export const AIChat: React.FC = () => {
                 className="text-[10px] leading-relaxed"
                 style={{ color: 'var(--text-secondary)' }}
               >
-                Your issue has been successfully resolved by the AI Copilot. Use <strong>Continue in This Chat</strong> to ask follow-up questions, or <strong>Start a New Conversation</strong> for a different issue.
+                Your issue has been successfully resolved by the AI Copilot. This conversation has ended. To ask a different question or start a new conversation, click the <strong>"New Chat"</strong> button at the top.
               </p>
             </div>
           ) : suggestedTicket && suggestedTicket.show ? (
