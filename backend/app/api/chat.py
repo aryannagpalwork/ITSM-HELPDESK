@@ -90,6 +90,33 @@ def _is_it_related_query(query: str, original_issue: str, chat_history: list[Cha
     return bool(words & IT_QUERY_TERMS)
 
 
+def _normalize_original_query(value: str | None) -> str | None:
+    normalized = (value or "").strip()
+    return normalized or None
+
+
+def _get_original_query_from_history(history_rows: list[dict] | None, *, fallback_query: str | None = None) -> str | None:
+    if history_rows:
+        for row in history_rows:
+            if row.get("role") != "user":
+                continue
+            candidate = _normalize_original_query(str(row.get("message") or ""))
+            if candidate:
+                return candidate
+    return _normalize_original_query(fallback_query)
+
+
+def _build_issue_title_from_query(original_query: str | None) -> str:
+    issue = _normalize_original_query(original_query) or "IT support request"
+    issue = re.sub(r"\s+", " ", issue).strip()
+    issue = re.sub(r"\s+[?!.]+$", "", issue)
+    if len(issue) > 220:
+        issue = issue[:217].rstrip() + "..."
+    if not issue:
+        return "IT support request"
+    return f"IT support needed: {issue}"
+
+
 def _greeting_prompt(query: str) -> BuiltPrompt:
     context = RetrievedContext(chunks=[], search_results=[], total_retrieved=0)
     return BuiltPrompt(
@@ -461,6 +488,7 @@ async def _upsert_ai_conversation_record(
     ticket_id: str | None = None,
     resolved_by_ai: bool | None = None,
     escalated: bool | None = None,
+    original_query: str | None = None,
 ) -> dict:
     """Persist the canonical AI conversation record and update the same document instead of creating duplicates."""
     if not conversation_id:
@@ -505,6 +533,11 @@ async def _upsert_ai_conversation_record(
         record["first_message_at"] = first_message_at
     if first_message_at and record.get("started_at") is None:
         record["started_at"] = first_message_at
+
+    if original_query is not None:
+        normalized_query = _normalize_original_query(original_query)
+        if normalized_query and not record.get("original_query"):
+            record["original_query"] = normalized_query
 
     if feedback is not None:
         record["feedback"] = feedback
@@ -668,7 +701,21 @@ async def _ensure_ai_resolved_ticket(
             None,
         )
 
-    title = str(ticket_details.get("title") or (user_messages[0] if user_messages else "AI Resolved Support Request"))[:255]
+    canonical_query = _get_original_query_from_history(
+        history_records,
+        fallback_query=conversation.get("original_query") if conversation else None,
+    ) or (user_messages[0] if user_messages else None)
+    if canonical_query:
+        transcript = "\n".join(
+            f"{'User' if row.get('role') == 'user' else 'Assistant'}: {row.get('message', '')}"
+            for row in history_records
+        )
+        ticket_details.setdefault("title", _build_issue_title_from_query(canonical_query))
+        ticket_details.setdefault("description", (
+            f"Original user query:\n{canonical_query}\n\n"
+            f"Relevant chat context:\n{transcript}"
+        ))
+    title = str(ticket_details.get("title") or (canonical_query or "AI Resolved Support Request"))[:255]
     description = str(ticket_details.get("description") or "\n".join(user_messages) or "Issue resolved by AI Copilot.")
     category = str(ticket_details.get("category") or "General")
     priority_value = str(ticket_details.get("priority") or "Medium").replace("_", " ").title()
@@ -1589,10 +1636,13 @@ async def chat(
     # an LLM before the user chooses to file the ticket.
     suggested_ticket = None
     if it_related_query and not kb_hit:
-        original_query = payload.query
-        context_text = _conversation_text(chat_history, payload.query)
+        original_query = _get_original_query_from_history(
+            await db["chat_history"].find({"session_id": session_id}).sort("created_at").to_list(length=None),
+            fallback_query=payload.query,
+        ) or payload.query
+        context_text = _conversation_text(chat_history, original_query)
         suggested_ticket = {
-            "title": "IT support needed: " + original_query[:220],
+            "title": _build_issue_title_from_query(original_query),
             "summary": "The Knowledge Base did not contain enough relevant information to answer this IT query.",
             "category": "General",
             "priority": "Medium",
@@ -1865,6 +1915,7 @@ async def escalate_to_ticket(
     # Get all chat history for the session
     chat_history_records_cursor = db["chat_history"].find({"session_id": payload.session_id}).sort("created_at")
     chat_history_records = await chat_history_records_cursor.to_list(length=None)
+    conversation = await db["ai_conversations"].find_one({"conversation_id": payload.session_id})
 
     if not chat_history_records:
         raise HTTPException(
@@ -1894,16 +1945,16 @@ async def escalate_to_ticket(
         chat_history.append(ChatMessage(role=role, content=hist_msg["message"]))
 
     if latest_metadata.get("unknown_it_fallback"):
-        original_query = next(
-            (record["message"] for record in reversed(chat_history_records) if record.get("role") == "user"),
-            "IT support request",
-        )
+        original_query = _get_original_query_from_history(
+            chat_history_records,
+            fallback_query=conversation.get("original_query") if conversation else None,
+        ) or "IT support request"
         transcript = "\n".join(
             f"{'User' if record.get('role') == 'user' else 'Assistant'}: {record.get('message', '')}"
             for record in chat_history_records
         )
         ticket_details = {
-            "title": "IT support needed: " + original_query[:220],
+            "title": _build_issue_title_from_query(original_query),
             "summary": "The Knowledge Base did not contain enough relevant information to answer this IT query.",
             "category": "General",
             "priority": "Medium",

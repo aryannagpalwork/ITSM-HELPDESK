@@ -24,20 +24,6 @@ const WELCOME_MESSAGE: ChatMessage = {
   timestamp: new Date().toISOString(),
 };
 
-const CONTINUE_PROMPT_MESSAGE: ChatMessage = {
-  id: 'continue_prompt',
-  sender: 'assistant',
-  text: "I am here to help resolve your issue. Tell me what you need help with.",
-  timestamp: new Date().toISOString(),
-};
-
-const FRESH_QUERY_MESSAGE: ChatMessage = {
-  id: 'fresh_query',
-  sender: 'assistant',
-  text: "Tell me your query.",
-  timestamp: new Date().toISOString(),
-};
-
 type SuggestedTicketState = {
   title: string;
   description: string;
@@ -89,8 +75,6 @@ interface ChatContextType {
   handleSatisfactionCreateTicket: () => Promise<void>;
   handleChatCreateAnyway: () => Promise<void>;
   dismissChatDuplicateWarning: () => void;
-  continueInThisChat: () => void;
-  startNewQuery: () => void;
   resetThread: () => void;
 }
 
@@ -668,42 +652,6 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try { sessionStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) { /* ignore */ }
   };
 
-  // Keep the conversation linked to the existing issue; add a prompt and unfreeze input.
-  const continueInThisChat = () => {
-    setTicketCreatedForIssue(false);
-    setCurrentIssueResolved(false);
-    setCurrentIssueShownSatisfaction(false);
-    setConversationStatus('CONTINUING');
-    setActiveSatisfactionCard(null);
-    setGuidedActions([]);
-    setGuidedState(null);
-    const promptMsg: ChatMessage = {
-      ...CONTINUE_PROMPT_MESSAGE,
-      id: `continue_prompt_${Date.now()}`,
-      timestamp: new Date().toISOString(),
-    };
-    setMessages(prev => [...prev, promptMsg]);
-  };
-
-  // Start a fresh issue context — reset everything and show a short prompt.
-  const startNewQuery = () => {
-    setMessages([FRESH_QUERY_MESSAGE]);
-    setSuggestedTicket(null);
-    setSessionId(null);
-    setCollapsedMessages({});
-    setActiveSatisfactionCard(null);
-    setConversationStatus('NEW_CONVERSATION');
-    setGuidedActions([]);
-    setGuidedState(null);
-    setTicketCreatedForIssue(false);
-    setCreatedTicketInfo(null);
-    setTicketSource(null);
-    setActiveTicketId(null);
-    setCurrentIssueResolved(false);
-    setCurrentIssueShownSatisfaction(false);
-    try { sessionStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) { /* ignore */ }
-  };
-
   return (
     <ChatContext.Provider
       value={{
@@ -738,8 +686,6 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         handleSatisfactionCreateTicket,
         handleChatCreateAnyway,
         dismissChatDuplicateWarning,
-        continueInThisChat,
-        startNewQuery,
         resetThread,
       }}
     >
