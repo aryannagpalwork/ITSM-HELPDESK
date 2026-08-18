@@ -366,7 +366,15 @@ async def _notify_employee_for_agent_response(db: AsyncIOMotorDatabase, ticket: 
     })
 
 
-async def _notify_assignment(db: AsyncIOMotorDatabase, ticket: dict, agent: dict, *, is_reassignment: bool = False, skip_requester_notification: bool = False) -> None:
+async def _notify_assignment(
+    db: AsyncIOMotorDatabase,
+    ticket: dict,
+    agent: dict,
+    *,
+    is_reassignment: bool = False,
+    skip_requester_notification: bool = False,
+    skip_agent_notification: bool = False,
+) -> None:
     """Persist assignment notifications for the agent and requester.
 
     Message branches on three things: whether the recipient IS the requester,
@@ -377,7 +385,7 @@ async def _notify_assignment(db: AsyncIOMotorDatabase, ticket: dict, agent: dict
     requester = await db.users.find_one({"_id": requester_id}) if requester_id else None
     requester_is_agent = bool(requester and requester.get("role") == "agent")
 
-    recipient_ids = [agent["_id"]]
+    recipient_ids = [] if skip_agent_notification else [agent["_id"]]
     if requester_id and requester_id != agent["_id"] and not skip_requester_notification:
         recipient_ids.append(requester_id)
 
@@ -1047,6 +1055,7 @@ async def create_ticket(
                 ticket,
                 assigned_agent,
                 skip_requester_notification=ai_created_ticket,
+                skip_agent_notification=ai_created_ticket,
             )
     if not ticket.get("assigned_to"):
         await _notify_unassigned_ticket(db, ticket)

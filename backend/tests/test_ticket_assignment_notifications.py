@@ -90,7 +90,7 @@ class TicketAssignmentNotificationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.notifications.inserted[0]["type"], "ticket.response")
         self.assertIn("response is required", db.notifications.inserted[0]["message"].lower())
 
-    async def test_ai_ticket_assignment_skips_employee_notification(self):
+    async def test_ai_ticket_assignment_skips_employee_and_agent_notifications(self):
         db = FakeDB()
         ticket = {
             "_id": "ticket-4",
@@ -99,11 +99,15 @@ class TicketAssignmentNotificationTests(unittest.IsolatedAsyncioTestCase):
         }
         agent = {"_id": "agent-2"}
 
-        await tickets._notify_assignment(db, ticket, agent, skip_requester_notification=True)
+        await tickets._notify_assignment(
+            db,
+            ticket,
+            agent,
+            skip_requester_notification=True,
+            skip_agent_notification=True,
+        )
 
-        self.assertEqual(len(db.notifications.inserted), 1)
-        self.assertEqual(db.notifications.inserted[0]["user_id"], "agent-2")
-        self.assertEqual(db.notifications.inserted[0]["message"], "Ticket T-1004 has been assigned to you.")
+        self.assertEqual(len(db.notifications.inserted), 0)
 
 if __name__ == "__main__":
     unittest.main()

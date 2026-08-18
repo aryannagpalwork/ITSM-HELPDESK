@@ -221,11 +221,18 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             raise EmbeddingError(f"Failed to embed batch: {str(e)}") from e
     
     def get_embedding_dimension(self) -> int:
-        """Get the dimension of embeddings produced by the model."""
-        if self._dimension is None:
-            result = self.embed("test")
-            self._dimension = len(result.embedding)
-        return self._dimension
+        """Get the dimension of embeddings produced by the model.
+
+        Returns the configured dimension directly -- no API call needed.
+        `self.dimensions` is already set from EMBEDDING_DIMENSION (or the
+        1536 default) in __init__, and is the same value sent as the
+        `dimensions` parameter on every real embed/embed_batch request.
+        Previously this made a live "test" embedding call just to learn a
+        number that was already known, which meant operations with no
+        actual need to call OpenAI (e.g. deleting a document) could fail
+        whenever the API was rate-limited or the account's quota was hit.
+        """
+        return self.dimensions
     
     def get_model_name(self) -> str:
         """Get the name of the embedding model."""

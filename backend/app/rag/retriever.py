@@ -27,6 +27,47 @@ def _tokenize(text: str) -> list[str]:
     return [token for token in re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).split() if token]
 
 
+# Function/filler words that carry no topical signal for keyword-overlap
+# scoring. Left in, they inflate the denominator AND give an unfair edge to
+# longer chunks, which are simply more likely to incidentally contain common
+# words like "about" or "the" purely because they have more text. A short,
+# exact-answer chunk that only contains the one real subject term has no such
+# advantage, so it loses to unrelated-but-longer chunks even when it's the
+# objectively correct match. Filtering these out of the QUERY side (not the
+# chunk side) removes that length-correlated bias.
+_STOPWORDS = {
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+    "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them",
+    "my", "your", "his", "its", "our", "their",
+    "this", "that", "these", "those",
+    "what", "which", "who", "whom", "whose",
+    "tell", "about", "please", "explain", "describe",
+    "can", "could", "would", "should", "will", "shall",
+    "do", "does", "did", "done",
+    "of", "for", "to", "in", "on", "at", "by", "with", "from", "into", "onto",
+    "and", "or", "but", "if", "then", "so", "as", "than",
+    "too", "very", "just", "also",
+    "not", "no", "yes",
+    "how", "when", "where", "why",
+    "there", "here", "some", "any", "all", "each", "more", "most",
+    "am", "have", "has", "had", "get", "got",
+}
+
+
+def _content_terms(query: str) -> set[str]:
+    """Return the meaningful (non-filler) terms from a normalized query.
+
+    Used everywhere keyword-overlap is scored against a chunk, so a query
+    like "Tell me about contraindications" is scored on "contraindications"
+    alone, not diluted (and length-biased) by "tell"/"me"/"about".
+    """
+    terms = set(_tokenize(normalize_query(query)))
+    content_terms = {term for term in terms if term not in _STOPWORDS}
+    # Never collapse to an empty set for an all-filler query — fall back to
+    # the raw terms so callers still get a signal instead of forced zero.
+    return content_terms or terms
+
+
 class QueryNormalizer:
     """Normalize and expand query terms to canonical Knowledge Base aliases."""
 
@@ -142,7 +183,7 @@ def expand_query_variants(query: str) -> list[str]:
 
 
 def _score_keyword_overlap(query: str, chunk_text: str) -> float:
-    query_terms = set(_tokenize(normalize_query(query)))
+    query_terms = _content_terms(query)
     if not query_terms:
         return 0.0
 
@@ -363,7 +404,7 @@ class HybridReranker(Reranker):
         self.keyword_weight = float(keyword_weight)
 
     def _keyword_overlap(self, query: str, chunk_text: str) -> float:
-        query_terms = set(_tokenize(normalize_query(query)))
+        query_terms = _content_terms(query)
         if not query_terms:
             return 0.0
 
