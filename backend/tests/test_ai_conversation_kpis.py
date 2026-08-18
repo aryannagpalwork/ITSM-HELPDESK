@@ -1,6 +1,8 @@
 import datetime as dt
 
-from app.services.kpi import compute_admin_kpis
+import pytest
+
+from app.services.kpi import _ticket_resolution_hours, compute_admin_kpis
 
 
 class FakeCursor:
@@ -82,6 +84,7 @@ class FakeDB:
         ])
 
 
+@pytest.mark.asyncio
 async def test_compute_admin_kpis_uses_ai_conversation_records():
     metrics = await compute_admin_kpis(FakeDB())
 
@@ -89,3 +92,16 @@ async def test_compute_admin_kpis_uses_ai_conversation_records():
     assert metrics.aiCopilot.aiResolved == 1
     assert metrics.aiCopilot.aiEscalated == 1
     assert metrics.aiResolutionRate == 50.0
+
+
+def test_ai_ticket_resolution_hours_uses_first_message_as_start():
+    ticket = {
+        "status": "Resolved",
+        "ai_resolved": True,
+        "created_at": dt.datetime(2024, 1, 1, 9, 0, 0),
+        "assigned_at": dt.datetime(2024, 1, 1, 8, 30, 0),
+        "resolved_at": dt.datetime(2024, 1, 1, 9, 40, 0),
+        "updated_at": dt.datetime(2024, 1, 1, 9, 40, 0),
+    }
+
+    assert _ticket_resolution_hours(ticket) == 1.1666666666666667

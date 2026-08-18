@@ -213,11 +213,20 @@ def _is_ai_resolved_ticket(ticket: dict) -> bool:
 
 
 def _ticket_resolution_hours(ticket: dict) -> float | None:
-    created = _coerce_datetime(ticket.get("created_at"))
-    updated = _coerce_datetime(ticket.get("updated_at"))
-    if not created or not updated:
+    if ticket.get("status") not in ("Resolved", "Closed"):
         return None
-    return float(_hours_between(created, updated))
+
+    start = _coerce_datetime(ticket.get("assigned_at"))
+    if _is_ai_resolved_ticket(ticket):
+        if start is None:
+            start = _coerce_datetime(ticket.get("created_at"))
+    else:
+        start = _coerce_datetime(ticket.get("created_at"))
+
+    updated = _coerce_datetime(ticket.get("resolved_at")) or _coerce_datetime(ticket.get("updated_at"))
+    if not start or not updated:
+        return None
+    return float(_hours_between(start, updated))
 
 
 def _ticket_mttr_breakdown(tickets: list[dict]) -> tuple[float, float]:

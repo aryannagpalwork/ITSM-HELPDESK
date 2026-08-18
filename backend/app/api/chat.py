@@ -656,6 +656,18 @@ async def _ensure_ai_resolved_ticket(
         except Exception:
             logger.exception("AI-resolved ticket detail generation failed; using conversation fallback")
 
+    conversation = await db["ai_conversations"].find_one({"conversation_id": session_id})
+    first_message_at = conversation.get("first_message_at") if conversation else None
+    if not isinstance(first_message_at, datetime):
+        first_message_at = next(
+            (
+                row.get("created_at")
+                for row in history_records
+                if row.get("role") == "user" and isinstance(row.get("created_at"), datetime)
+            ),
+            None,
+        )
+
     title = str(ticket_details.get("title") or (user_messages[0] if user_messages else "AI Resolved Support Request"))[:255]
     description = str(ticket_details.get("description") or "\n".join(user_messages) or "Issue resolved by AI Copilot.")
     category = str(ticket_details.get("category") or "General")
@@ -683,22 +695,27 @@ async def _ensure_ai_resolved_ticket(
             ai_payload,
             reason="Resolved by AI",
             current_user=current_user,
+            assignment_time_override=first_message_at or now,
         )
     except Exception:
         logger.exception("AI ticket creation failed session_id=%s payload=%s", session_id, ai_payload_data)
         raise
-    await db["tickets"].update_one(
-        {"_id": ticket.id},
-        {"$set": {
-            "resolved_at": now,
-            "closed_at": now,
-            "updated_at": now,
-        }},
-    )
+
+    ticket_update = {
+        "resolved_at": now,
+        "closed_at": now,
+        "updated_at": now,
+    }
+    if isinstance(first_message_at, datetime):
+        ticket_update["assigned_at"] = first_message_at
+        ticket_update["assignment_type"] = "Automatic"
+        ticket_update["assignment_reason"] = "AI First Message"
+    await db["tickets"].update_one({"_id": ticket.id}, {"$set": ticket_update})
     logger.info(
-        "AI ticket resolved timestamps saved ticket_id=%s ticket_number=%s resolved_at=%s closed_at=%s",
+        "AI ticket resolved timestamps saved ticket_id=%s ticket_number=%s assigned_at=%s resolved_at=%s closed_at=%s",
         ticket.id,
         ticket.ticket_number,
+        ticket_update.get("assigned_at"),
         now,
         now,
     )
